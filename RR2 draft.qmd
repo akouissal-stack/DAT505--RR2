@@ -1,0 +1,52 @@
+---
+title: "RR2 draft"
+author: "Ouissal Akioui"
+format: 
+  html:
+    self_contained: true
+    toc: true
+    toc-depth: 2
+    embed-resources: true
+execute:
+  echo: true
+  warning: false
+  message: false
+editor: visual
+---
+
+## Introduction
+
+## Descriptive Analyses
+
+```{r}
+rm(list=ls()) #This line of code cleans the environment
+
+# Load libraries (or packages):
+library(tidyverse) 
+library(dplyr)
+
+#Load the dataset, we're limiting ourselves to the hespress one which contains the most articles out of the 4:
+hespress <- read_csv("Hespress.ma.csv", show_col_types = FALSE)
+
+View(hespress)
+```
+
+```{r}
+library(tidyverse)
+
+# Load all datasets with source labels
+hespress   <- read_csv("Hespress.ma.csv",   show_col_types = FALSE) %>% mutate(source = "Hespress")
+hibapress  <- read_csv("Hibapress.com.csv", show_col_types = FALSE) %>% mutate(source = "Hibapress")
+le360      <- read_csv("Le360.com.csv",     show_col_types = FALSE) %>% mutate(source = "Le360")
+akhbarona  <- read_csv("Akhbarona.ma.csv",  show_col_types = FALSE) %>% mutate(source = "Akhbarona")
+
+```
+
+```{r}
+hespress_c  <- hespress  %>% filter(category == "Culture")
+hibapress_c <- hibapress %>% filter(category == "Culture")
+le360_c     <- le360     %>% filter(category == "Culture")
+akhbarona_c <- akhbarona %>% filter(category == "Culture")
+
+
+```
