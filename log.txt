@@ -1,0 +1,160 @@
+[1mindexing[0m [34mDatabase.csv[0m [=====-------------------------------------------------------------------------] [32m26.81MB/s[0m, eta: [36m 0s[0m[1mindexing[0m [34mDatabase.csv[0m [=============================================================================] [32m114.71MB/s[0m, eta: [36m 0s[0m                                                                                                                                                             [1mindexing[0m [34mMessage_info.csv[0m [=================================================================----------] [32m2.15GB/s[0m, eta: [36m 0s[0m[1mindexing[0m [34mMessage_info.csv[0m [=========================================================================] [32m425.85MB/s[0m, eta: [36m 0s[0m                                                                                                                                                             Refused to answer        Don't know    Not applicable 
+              999               888               555 
+[1] 999 888 555
+
+BrickPhone Smartphone       <NA> 
+     44119      13234          1 
+ [1] "Lasbela"             "Kech"                "Killa Abdullah"      "Nasirabad"           "Killa Saifullah"    
+ [6] "Loralai"             "Panjgur"             "Zhob"                "Gwadar"              "Mastung"            
+[11] "Sibbi"               "Ziarat"              "Nushki"              "Kohlu"               "Kachi"              
+[16] "Kalat"               "Khuzdar"             "Jaffarabad"          "Harnai"              "Awaran"             
+[21] "Jhal Magsi"          "Chagai"              "Dera Bugti"          "Kharan"              "Washuk"             
+[26] "Pishin"              "Sohbatpur"           "Hangu"               "Khyber"              "Bajour"             
+[31] "Lakki Marwat"        "Bannu"               "Upper Dir"           "Matiari"             "Tando M Khan"       
+[36] "Naushehro Feroz"     "Kambar Shahdadkot"   "Naushehro Feroze"    "Nausheroferoz"       "Jacobabad"          
+[41] "Kashmore"            "Shaheedbenazirabad"  "Sujawal"             "Shaheed Benazirabad" "Shikarpur"          
+[46] "Thatta"              "Ghotki"              "Dadu"                "Jamshoro"            "Khairpur"           
+[51] "Larkana"             "Karachi West"        "Karachi Central"     "Lasbell"            
+ pos variable        label                                                             col_type missing
+ 1   id              Unique user identifier                                            dbl      1      
+ 2   phone           Type of phone (BrickPhone or Smartphone)                          chr      1      
+ 3   female          —                                                                 dbl+lbl  34     
+                                                                                                       
+ 4   service         Type of information requested (A=Vaccine, B=Covid-19, C=Children~ fct      43116  
+                                                                                                       
+                                                                                                       
+                                                                                                       
+ 5   district        Respondent's district                                             chr      0      
+ 6   messagedatetime Date and time message was sent                                    chr      1624   
+ 7   age             Respondent's age in years                                         dbl+lbl  6642   
+                                                                                                       
+                                                                                                       
+ 8   answer          Reply to invitation (Yes or blank)                                chr      43116  
+ 9   message         —                                                                 dbl+lbl  7355   
+                                                                                                       
+ 10  social_norm     —                                                                 dbl+lbl  7355   
+                                                                                                       
+ 11  registered      —                                                                 dbl+lbl  0      
+                                                                                                       
+ 12  service_A       —                                                                 dbl+lbl  43116  
+                                                                                                       
+ 13  service_B       —                                                                 dbl+lbl  43116  
+                                                                                                       
+ 14  service_C       —                                                                 dbl+lbl  43116  
+                                                                                                       
+ 15  service_D       —                                                                 dbl+lbl  43116  
+                                                                                                       
+ values                 
+                        
+                        
+ [0] Male               
+ [1] Female             
+ Vaccine information    
+ Covid-19 information   
+ Children support       
+ Anxiety                
+                        
+                        
+ [999] Refused to answer
+ [888] Don't know       
+ [555] Not applicable   
+                        
+ [1] Neutral            
+ [2] Social Norm        
+ [0] Neutral            
+ [1] Social Norm        
+ [0] Did not register   
+ [1] Registered         
+ [0] No                 
+ [1] Yes                
+ [0] No                 
+ [1] Yes                
+ [0] No                 
+ [1] Yes                
+ [0] No                 
+ [1] Yes                
+# A tibble: 50 × 4
+   district            dist_prefix     n  rank
+   <chr>               <chr>       <int> <int>
+ 1 Karachi West        KA          14253     1
+ 2 Karachi Central     KA           9566     2
+ 3 Lasbela             LA           2330     3
+ 4 Larkana             LA           2292     4
+ 5 Khairpur            KH           1792     5
+ 6 Jamshoro            JA           1780     6
+ 7 Dadu                DA           1732     7
+ 8 Lakki Marwat        LA           1604     8
+ 9 Shaheed Benazirabad SH           1531     9
+10 Thatta              TH           1437    10
+11 Ghotki              GH           1402    11
+12 Killa Abdullah      KI           1384    12
+13 Shikarpur           SH           1257    13
+14 Pishin              PI           1198    14
+15 Naushehro Feroze    NA           1166    15
+16 Jacobabad           JA           1144    16
+17 Upper Dir           UP           1122    17
+18 Kashmore            KA           1053    18
+19 Bannu               BA            981    19
+20 Sujawal             SU            969    20
+21 Tando M Khan        TA            963    21
+22 Kech                KE            694    22
+23 Nasirabad           NA            601    23
+24 Killa Saifullah     KI            588    24
+25 Matiari             MA            565    25
+26 Loralai             LO            452    26
+27 Panjgur             PA            438    27
+28 Gwadar              GW            367    28
+29 Khyber              KH            355    29
+30 Zhob                ZH            350    30
+31 Jaffarabad          JA            299    31
+32 Mastung             MA            243    32
+33 Sibbi               SI            162    33
+34 Jhal Magsi          JH            154    34
+35 Khuzdar             KH            148    35
+36 Kachi               KA            145    36
+37 Nushki              NU            118    37
+38 Bajour              BA            114    38
+39 Hangu               HA             98    39
+40 Chagai              CH             83    40
+41 Ziarat              ZI             74    41
+42 Dera Bugti          DE             67    42
+43 Kalat               KA             64    43
+44 Harnai              HA             55    44
+45 Awaran              AW             44    45
+46 Kohlu               KO             34    46
+47 Kharan              KH             30    47
+48 Kambar Shahdadkot   KA             25    48
+49 Washuk              WA             25    49
+50 Sohbatpur           SO              6    50
+[1] 0
+[1] 0
+   Min. 1st Qu.  Median    Mean 3rd Qu.    Max.    NA's 
+  16.00   27.00   37.00   82.75   48.00  999.00    3229 
+   Min. 1st Qu.  Median    Mean 3rd Qu.    Max.    NA's 
+  16.00   26.00   36.00   35.77   46.00   55.00    6641 
+[1] "C:/Users/hp/Documents/CUBIC Quantitative Test 2026"
+
+  There are binary versions available but the source versions are later:
+           binary source needs_compilation
+lifecycle   1.0.4  1.0.5             FALSE
+vctrs       0.6.5  0.7.2              TRUE
+dplyr       1.1.4  1.2.0              TRUE
+htmltools 0.5.8.1  0.5.9              TRUE
+sass        0.4.9 0.4.10              TRUE
+cards       0.1.0  0.7.1             FALSE
+cardx       0.1.0  0.3.2             FALSE
+cli         3.6.2  3.6.5              TRUE
+gt         0.10.1  1.3.0             FALSE
+gtsummary   1.7.2  2.5.0             FALSE
+
+Warning in install.packages :
+  installation of package ‘cli’ had non-zero exit status
+Warning in install.packages :
+  installation of package ‘vctrs’ had non-zero exit status
+Warning in install.packages :
+  installation of package ‘dplyr’ had non-zero exit status
+Warning in install.packages :
+  installation of package ‘cardx’ had non-zero exit status
+Warning in install.packages :
+  installation of package ‘gtsummary’ had non-zero exit status
+Error in install.packages : Updating loaded packages

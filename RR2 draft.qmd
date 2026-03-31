@@ -16,22 +16,25 @@ editor: visual
 
 ## Introduction
 
-## Descriptive Analyses
+This report examines the thematic structure of cultural coverage in Moroccan digital news. The dataset consists of 15,966 articles drawn from four major online outlets — Hespress, Hibapress, Le360, and Akhbarona — filtered to the Culture category from a larger Arabic-language news corpus. Each observation corresponds to a single published article, with outlet identity recorded as the primary grouping variable.
+
+Rather than treating cultural news as a homogeneous category, this analysis asks how cultural coverage is internally structured and whether outlets differ in their thematic priorities. I use a Structural Topic Model (STM) to identify 10 latent sub-themes within the corpus, ranging from cinema and music festivals to literary culture and institutional policy coverage. Topic proportions are then regressed on outlet identity to test the following hypotheses.
+
+H1: Thematic emphasis in cultural news coverage differs significantly across Moroccan digital outlets.
+
+H2: Le360 and Hespress will allocate greater coverage to institutional and literary cultural topics compared to Hibapress and Akhbarona, with Le360 leading in literary and intellectual themes given its formally oriented reputation, and Hespress following closely behind due to its perceived institutional character.
+
+## Analyses
+
+Four filtered datasets were merged into a single dataframe containing 15,966 articles and three variables: article title, body text, and source.
 
 ```{r}
 rm(list=ls()) #This line of code cleans the environment
 
-# Load libraries (or packages):
-library(tidyverse) 
-library(dplyr)
-
-#Load the dataset, we're limiting ourselves to the hespress one which contains the most articles out of the 4:
-hespress <- read_csv("Hespress.ma.csv", show_col_types = FALSE)
-
-View(hespress)
 ```
 
 ```{r}
+
 library(tidyverse)
 
 # Load all datasets with source labels
@@ -43,6 +46,7 @@ akhbarona  <- read_csv("Akhbarona.ma.csv",  show_col_types = FALSE) %>% mutate(s
 ```
 
 ```{r}
+#filtering all of them to keep only culture
 hespress_c  <- hespress  %>% filter(Category == "Culture")
 hibapress_c <- hibapress %>% filter(Category == "Culture")
 le360_c     <- le360     %>% filter(Category == "Culture")
@@ -52,6 +56,7 @@ akhbarona_c <- akhbarona %>% filter(Category == "Culture")
 ```
 
 ```{r}
+#merging all of it in one with a newly created source variable
 culture_df <- bind_rows(hespress_c, hibapress_c, le360_c, akhbarona_c)
 
 table(culture_df$source)
@@ -59,28 +64,35 @@ nrow(culture_df)
 ```
 
 ```{r}
+#remove category since there is just one
 culture_df <- culture_df %>% select(-Category)
-
-```
-
-```{r}
 View(culture_df)
+
 ```
 
+### SECTION 1 : TEXT PREPROCESSING FOR ARABIC TOPIC MODELLING
+
+Before the topic model could be run, the raw article text required several cleaning steps to reduce noise and isolate meaningful content.
+
+The first step was basic text normalization. URLs, email addresses, numbers, and punctuation were stripped from the text. Arabic diacritics (tashkeel, the small vowel marks written above and below letters) were also removed, as the same word can appear with or without them across articles and they would otherwise be treated as distinct tokens.
+
+The text was then tokenized, split into individual words, producing one token per row, which is the format the topic model requires.
+
+The most iterative part of preprocessing was stopword removal. Arabic presents a particular challenge here: the language has an enormous number of functional words, particles, and conjunctions that carry no thematic meaning, and standard stopword lists do not catch all of them. A base list from the `stopwords` package (stopwords-iso) was used as a starting point, but it required substantial manual extension. Words like "said", "this", "after", and common reporting verbs were added by hand after inspecting which high-frequency words were slipping through. The word "Morocco" (المغرب) was also removed, since every article in the corpus is about Morocco by definition, it appears so frequently that it would dominate topics without adding any discriminating information.
+
+Finally, any token shorter than three characters was discarded, as these tend to be leftover particles or noise rather than meaningful words.
+
+One decision worth noting: the text was **not stemmed**. In many languages, stemming (reducing words to their root form) is a useful normalization step. Arabic, however, is a root-and-pattern language where words are built from three-letter roots through internal vowel changes and affixes, not simple prefix or suffix removal. Standard stemming approaches designed for languages like English perform poorly on Arabic and can distort meaning. Keeping the full word forms was therefore a more conservative and reliable choice, at the cost of some vocabulary redundancy.
+
 ```{r}
-# ============================================================
-# STEP 1: TEXT PREPROCESSING FOR ARABIC TOPIC MODELLING
-# ============================================================
 
 library(tidyverse)
 library(tidytext)
 library(stopwords)
-library(SnowballC)    # for stemming
 library(stringr)
 
-# ============================================================
+
 # 1A: CLEAN THE RAW TEXT
-# ============================================================
 
 culture_clean <- culture_df %>%
   mutate(
@@ -101,11 +113,6 @@ culture_clean <- culture_df %>%
     # Remove Arabic diacritics (tashkeel - the small vowel marks)
     text = str_remove_all(text, "[\u064B-\u065F]"),
     
-    # Remove tatweel (Arabic stretch character ـ)
-    text = str_remove_all(text, "\u0640"),
-    
-    # Collapse multiple spaces into one
-    text = str_squish(text)
   ) %>%
   # Add a unique document ID — we'll need this later
   mutate(doc_id = row_number())
@@ -113,9 +120,7 @@ culture_clean <- culture_df %>%
 # Quick check
 head(culture_clean$text, 3)
 
-# ============================================================
 # 1B: TOKENIZE (one word per row)
-# ============================================================
 
 culture_tokens <- culture_clean %>%
   select(doc_id, source, text) %>%
@@ -128,92 +133,72 @@ culture_tokens <- culture_clean %>%
 # How many tokens total?
 nrow(culture_tokens)
 
-# ============================================================
+
 # 1C: REMOVE STOPWORDS
-# ============================================================
+
 
 # Get Arabic stopwords from the stopwords package
 arabic_stopwords <- stopwords("ar", source = "stopwords-iso")
 
 # Also add some common noise words manually
-# (you can expand this list as you see what slips through)
+# (we expand this list as we see what slips through)
 
 custom_stopwords <- c(
   "قال", "قالت", "أن", "التي", "الذي", "وقد", "كان", "كانت",
   "هذا", "هذه", "وهو", "وهي", "أو", "لا", "ما", "مع", "عن",
   "في", "من", "على", "إلى", "عند", "حيث", "بعد", "قبل",
   "هناك", "يوم", "خلال", "حول", "بين", "أكد", "أضاف",
-  "انه", "عبر", "عبد"  # newly added
+  "انه","أنه", "مغرب", "عبر", "عبد"  # morocco "مغرب" is  is so frequent it's basically noise. 
 )
 
-all_stopwords <- c(arabic_stopwords, custom_stopwords)
+custom_stopwords2 <- c("وذلك","أيضا", "أخرى","خاصة", "المغربية", "المغربي", "المغرب")
+
+all_stopwords <- c(arabic_stopwords, custom_stopwords, custom_stopwords2)
 
 # Filter them out
 culture_tokens <- culture_tokens %>%
   filter(!word %in% all_stopwords)
 
-# ============================================================
+
 # 1D: REMOVE SHORT TOKENS (less than 3 characters)
 # These are usually noise — conjunctions, leftover particles
-# ============================================================
 
 culture_tokens <- culture_tokens %>%
   filter(nchar(word) >= 3)
 
-# ============================================================
-# 1E: STEMMING
-# ============================================================
 
-# Note: SnowballC supports Arabic stemming
-culture_tokens <- culture_tokens %>%
-  mutate(word = wordStem(word, language = "arabic"))
-
-# ============================================================
-# 1F: CHECK MOST FREQUENT WORDS
-# (sanity check — do the top words make sense?)
-# ============================================================
 
 culture_tokens %>%
   count(word, sort = TRUE) %>%
   head(30)
 
-# ============================================================
-# 1G: BUILD THE DOCUMENT-TERM MATRIX (DTM)
-# This is what the STM will actually consume
-# ============================================================
+```
 
-culture_dtm <- culture_tokens %>%
-  count(doc_id, word) %>%          # count word per document
-  cast_dtm(                         # convert to DTM format
-    document = doc_id,
-    term     = word,
-    value    = n
-  )
+After preprocessing, the corpus contains **4.4 million tokens** across the 15,966 articles. The 30 most frequent words are overwhelmingly thematic rather than noise, which means the cleaning pipeline worked well.
 
-# Check dimensions: should be (n articles) x (n unique words)
-dim(culture_dtm)
+Before running the topic model, we save a small reference table that links each article to its outlet. This is needed later to tell the model which newspaper published each piece.
 
-# ============================================================
-# 1H: SAVE THE METADATA (we'll need source labels later for STM)
-# ============================================================
+```{r}
+#SAVE THE METADATA (we'll need source labels later for STM)
 
 culture_meta <- culture_clean %>%
   select(doc_id, source)
 
-# Done! You now have:
-# - culture_dtm  : the document-term matrix for the STM
-# - culture_meta : the metadata (source per doc) for the regression part
 ```
 
-```{r}
-# ============================================================
-# STEP 2: RUN THE STM
-# ============================================================
+### SECTION 2: THE STRUCTURAL TOPIC MODEL
 
-library(stm)
+A Structural Topic Model (STM) is a method that automatically discovers recurring themes in a large collection of texts. The basic idea is simple: words that tend to appear together probably belong to the same theme. Feed the model 15,966 articles and it will find, on its own, that "film", "director", and "screening" keep showing up in the same articles, and label that cluster a topic. You then inspect the top words and give the topic a human-readable name.
+
+What makes STM different from simpler versions of this approach is that it lets you bring in extra information about each document, in this case, which outlet published it. This means the model can go beyond just finding themes and actually test whether outlet identity predicts how much of each theme an article contains. That's the bridge between the topic modeling and the hypothesis.
+
+Before the topic model can run, the cleaned text needs to be converted into a numerical format the algorithm can process. This takes the form of a Document-Feature Matrix (DFM); a large table where each row represents one article, each column represents a word from the full vocabulary, and each cell records how many times that word appeared in that article. Most cells are zero, since any given article only uses a small fraction of the total vocabulary. This matrix is built directly from the cleaned tokens and then converted into the format the STM package expects.
+
+```{r}
+
 library(quanteda)
 
-# Build dfm directly from tokens (skip the tm DTM entirely)
+# Build dfm directly from tokens 
 culture_dfm <- culture_tokens %>%
   count(doc_id, word) %>%
   cast_dfm(document = doc_id, term = word, value = n)
@@ -226,11 +211,20 @@ meta_aligned <- culture_meta %>%
   filter(doc_id %in% as.integer(culture_stm$documents %>% names())) %>%
   arrange(doc_id)
 
+```
+
+The model is set to find 10 topics. An earlier exploratory run with 15 produced too much overlap between adjacent themes, cinema and film festivals kept bleeding into each other, for instance, so 10 is a cleaner, more interpretable solution.
+
+```{r}
+#| results: hide
+#| message: false
+
+library(stm)
 # Run STM
 stm_model <- stm(
   documents  = culture_stm$documents,
   vocab      = culture_stm$vocab,
-  K          = 15,
+  K          = 10,   #changed from 15 bcs too much overlap and incoherence
   prevalence = ~ source,
   data       = meta_aligned,
   max.em.its = 75,
@@ -239,10 +233,222 @@ stm_model <- stm(
 )
 ```
 
+Following model convergence, the top words per topic were inspected to assign interpretive labels, and the expected topic proportions were examined across the full corpus before moving to outlet-level comparisons.
+
 ```{r}
-# Top words per topic (the main thing to look at)
+#| eval: false
+# Top words per topic
 labelTopics(stm_model, n = 10)
 
-# Expected proportion of each topic across all documents
+```
+
+```{r}
+
+## Assign labels based on inspection
+topic_labels <- c(
+  "Cinema & Film Awards",        # Topic 1
+  "Celebrity Scandals & Legal",  # Topic 2
+  "Music & Songs",               # Topic 3
+  "TV & Ramadan Series",         # Topic 4
+  "Cultural Festivals & Theatre",# Topic 5
+  "Books, Heritage & Museums",   # Topic 6
+  "Poetry, Obituaries & Arts",   # Topic 7
+  "Celebrity Social Media",      # Topic 8
+  "Literary Cinema & Criticism", # Topic 9
+  "Cultural Policy & Ministry"   # Topic 10
+)
+```
+
+```{r}
+
+# Topic proportions summary plot
 plot(stm_model, type = "summary", xlim = c(0, 0.3))
 ```
+
+***Figure 1**. Expected proportion of each topic across the 15,966-article corpus. Topics are ordered by prevalence. Labels reflect the three highest-probability words per topic.*
+
+Music & Songs (Topic 3) dominates the corpus, accounting for roughly 20% of all cultural coverage, followed closely by Cultural Festivals & Theatre (Topic 5) and Books, Heritage & Museums (Topic 6). Entertainment-adjacent topics — celebrity scandals (Topic 2) and social media content (Topic 8) — occupy the middle range, while TV & Ramadan Series (Topic 4), Cultural Policy (Topic 10), and Literary Cinema (Topic 9) are the least represented themes overall. This distribution suggests that Moroccan cultural news is driven primarily by music and live events coverage, with institutional and policy-oriented content occupying a comparatively smaller share of the space.
+
+Having confirmed that the topic model converged, the estimated topic proportions are extracted from the model object. Each article is represented as a vector of 10 values summing to one (10 topics), where each value reflects the share of that article's content attributed to a given topic. Outlet identity is then re-attached to this dataframe, producing the dataset used for all subsequent outlet-level comparisons.
+
+```{r}
+#| results: hide
+# Extract topic proportions per document
+topic_proportions <- as.data.frame(stm_model$theta)
+
+# theta is the matrix where each row is an article 
+# and each column is a topic — values are the proportions
+colnames(topic_proportions) <- topic_labels
+
+# Add source back
+topic_proportions$source <- meta_aligned$source
+
+# Peek at it
+head(topic_proportions)
+```
+
+### SECTION 3: ESTIMATE EFFECT OF SOURCE ON TOPIC PREVALENCE
+
+To examine whether thematic emphasis in cultural coverage varies across news outlets, I use the `estimateEffect` function from the STM package, which regresses estimated topic proportions on outlet identity. For each of the 10 topics, the model estimates how much each outlet deviates from the baseline in its coverage of that topic. Unlike a standard OLS regression applied to raw topic proportions, `estimateEffect` incorporates the posterior uncertainty from the topic model itself when computing standard errors, producing more honest estimates. The `uncertainty = "Global"` option propagates this uncertainty globally across the model. Source (news outlet) is the sole predictor, with Akhbarona serving as the reference category by default due to alphabetical ordering.
+
+```{r}
+#| results: hide
+effect <- estimateEffect(
+  formula     = 1:10 ~ source,
+  stmobj      = stm_model,
+  metadata    = meta_aligned,
+  uncertainty = "Global"
+)
+
+# Summary
+summary(effect, topics = 1:10)
+```
+
+```{r}
+library(knitr)
+library(kableExtra)
+
+# Extract coefficients into a clean dataframe
+reg_table <- data.frame()
+
+for (t in 1:10) {
+  coefs <- summary(effect, topics = t)$tables[[1]]
+  rows <- coefs[c("sourceHespress", "sourceHibapress", "sourceLe360"), ]
+  
+  reg_table <- rbind(reg_table, data.frame(
+    Topic    = topic_labels[t],
+    Outlet   = gsub("source", "", rownames(rows)),
+    Estimate = round(rows[, "Estimate"], 3),
+    SE       = round(rows[, "Std. Error"], 3),
+    p        = round(rows[, "Pr(>|t|)"], 3)
+  ))
+}
+
+# Add significance stars
+reg_table$p <- ifelse(reg_table$p < 0.001, "<.001 ***",
+               ifelse(reg_table$p < 0.01,  "<.01 **",
+               ifelse(reg_table$p < 0.05,  "<.05 *",
+               as.character(reg_table$p))))
+
+kable(reg_table, row.names = FALSE,
+      col.names = c("Topic", "Outlet", "β", "SE", "p")) %>%
+  kable_styling(full_width = FALSE, font_size = 12) %>%
+  collapse_rows(columns = 1, valign = "top")
+```
+
+***Table 1.** presents the estimated coefficients, standard errors, and significance levels for all ten topics across the three remaining outlets.*
+
+The regression results reveal substantial and statistically significant differences in thematic emphasis across all four outlets, with Akhbarona serving as the reference category. These results support H1: outlet identity is a meaningful predictor of cultural topic prevalence.
+
+Turning to H2, the findings only partially confirm the hypothesis. As expected, Hespress does not behave like a typical mass-audience outlet. It allocates significantly more coverage to Books, Heritage & Museums (β = 0.088, p \< .001), Literary Cinema & Criticism (β = 0.074, p \< .001), and Poetry, Obituaries & Arts (β = 0.081, p \< .001) than Akhbarona — and crucially, more than Le360 on the literary and intellectual dimensions. Le360, which was expected to lead on serious cultural content, instead shows its strongest advantage on Cinema & Film Awards (β = 0.061, p \< .001), Cultural Festivals & Theatre (β = 0.123, p \< .001), and Music & Songs (β = 0.138, p \< .001) — a more event-driven, institutionalized profile rather than a literary one.
+
+Hibapress presents the sharpest contrast to both. Its dominant signal is Celebrity Social Media (β = 0.177, p \< .001), while it significantly undercovers TV & Ramadan Series (β = -0.022, p \< .01) and Cultural Policy (β = -0.020, p \< .01). It is clearly the entertainment-oriented outlet.
+
+The pattern that emerges is therefore more nuanced than a simple serious-versus-popular divide. Hespress occupies an unexpected literary niche, Le360 owns the institutional events space, and Hibapress corners celebrity content.
+
+### SECTION 4: BOOTSTRAPPING
+
+What we're doing is bootstrapping the regression step conditional on the topic model being fixed, instead of a bootstrap re-estimating the entire topic model on each bootstrap sample.
+
+The regression estimates above rely on standard errors that incorporate posterior uncertainty from the topic model itself, but a further robustness check is warranted. To confirm that the outlet differences identified are stable and not an artifact of the specific sample, I complement the regression with a bootstrap procedure. Rather than re-estimating the full topic model on each iteration (which would be computationally a lot), the bootstrap resamples articles with replacement and refits the regression on each sample, holding the topic model fixed. This produces empirical confidence intervals that do not depend on distributional assumptions. If the bootstrapped intervals align with the regression results and do not straddle zero for the same coefficients, the findings can be considered robust.
+
+```{r}
+
+#| results: hide
+#| message: false
+
+set.seed(123)
+n_boot <- 1000  # number of bootstrap iterations
+
+# Store bootstrapped coefficients for each topic
+boot_results <- list()
+
+for (t in 1:10) {
+  topic_prop <- stm_model$theta[, t]  # Extract topic proportion for this topic
+  boot_data <- data.frame(        # Combine with source
+    proportion = topic_prop,
+    source     = meta_aligned$source
+  )
+   
+  # Bootstrap
+  boot_coefs <- replicate(n_boot, {
+    idx    <- sample(nrow(boot_data), replace = TRUE) # Resample with replacement
+    sample <- boot_data[idx, ]
+    fit    <- lm(proportion ~ source, data = sample)  # Refit regression
+    coef(fit)
+  })
+  boot_results[[t]] <- t(boot_coefs)
+}
+
+# Build summary table
+boot_summary <- data.frame()
+
+for (t in 1:10) {
+  ci <- apply(boot_results[[t]], 2, quantile, probs = c(0.025, 0.975))
+  for (src in c("sourceHespress", "sourceHibapress", "sourceLe360")) {
+    boot_summary <- rbind(boot_summary, data.frame(
+      Topic  = topic_labels[t],
+      Outlet = gsub("source", "", src),
+      Lower  = round(ci[1, src], 3),
+      Upper  = round(ci[2, src], 3)
+    ))
+  }
+}
+
+```
+
+```{r}
+#| echo: false
+kable(boot_summary, row.names = FALSE,
+      col.names = c("Topic", "Outlet", "2.5%", "97.5%"),
+      caption = "Table 2. Bootstrapped 95% Confidence Intervals (ref: Akhbarona)") %>%
+  kable_styling(full_width = FALSE, font_size = 12) %>%
+  collapse_rows(columns = 1, valign = "top")
+```
+
+The bootstrapped confidence intervals corroborate the `estimateEffect` results. Across all 10 topics, coefficients that were significant in the regression maintain the same sign and do not straddle zero in the bootstrap, confirming that the outlet differences identified are stable and not a sampling artifact. The most notable results directly relevant to H2 hold firmly: Hespress shows consistently positive intervals for Books, Heritage & Museums and Literary Cinema & Criticism, while Le360's intervals for the same topics are narrow and cross zero, confirming that Hespress genuinely leads on literary content.
+
+```{r}
+library(ggplot2)
+
+# Build a dataframe of bootstrapped CIs
+plot_data <- data.frame()
+
+for (t in 1:10) {
+  ci <- apply(boot_results[[t]], 2, quantile, probs = c(0.025, 0.5, 0.975))
+  
+  for (src in c("sourceHespress", "sourceHibapress", "sourceLe360")) {
+    plot_data <- rbind(plot_data, data.frame(
+      topic  = topic_labels[t],
+      source = gsub("source", "", src),
+      lo     = ci[1, src],
+      mid    = ci[2, src],
+      hi     = ci[3, src]
+    ))
+  }
+}
+
+# Plot
+ggplot(plot_data, aes(x = mid, y = topic, color = source)) +
+  geom_point(position = position_dodge(0.5), size = 2) +
+  geom_errorbarh(aes(xmin = lo, xmax = hi),
+                 position = position_dodge(0.5), height = 0.3) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "gray40") +
+  facet_wrap(~ source) +
+  labs(
+    title = "Effect of News Outlet on Cultural Topic Prevalence",
+    subtitle = "Bootstrapped 95% Confidence Intervals (ref: Akhbarona)",
+    x = "Coefficient (difference in topic proportion vs Akhbarona)",
+    y = NULL
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+***Figure 2.** Effect of news outlet on cultural topic prevalence, relative to Akhbarona (reference category). Points represent bootstrapped median coefficients and horizontal lines denote 95% confidence intervals. Coefficients to the right of zero indicate greater topic prevalence relative to Akhbarona; coefficients to the left indicate lower prevalence.*
+
+Figure 2 visualises the bootstrapped regression results across all ten topics and three outlets. The pattern is striking in its consistency. Hespress (red) shows positive and precisely estimated effects for Books, Heritage & Museums, Literary Cinema & Criticism, and Poetry, Obituaries & Arts — its literary profile is unambiguous. Le360 (blue) dominates on Music & Songs, Cultural Festivals & Theatre, and Cinema & Film Awards, confirming its event-driven institutional orientation. Hibapress (green) stands out almost exclusively on Celebrity Social Media, where its coefficient dwarfs all others in the model, while remaining near zero or negative across every other topic.
+
+These results broadly support H1: outlet identity does predict thematic emphasis, and the differences are statistically robust across nearly all topics.
+
+The most direct test of H2 is visible in the Books, Heritage & Museums and Literary Cinema & Criticism rows: Hespress sits clearly to the right while Le360 hovers near zero, confirming that Hespress, not Le360, is the literary outlet in the Moroccan cultural news landscape according to this corpus. This is the core finding of the analysis.
