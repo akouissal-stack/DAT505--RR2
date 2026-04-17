@@ -14,6 +14,8 @@ execute:
 editor: visual
 ---
 
+## PART 1: STM & REGRESSION
+
 ## Introduction
 
 This report examines the thematic structure of cultural coverage in Moroccan digital news. The dataset consists of 15,966 articles drawn from four major online outlets — Hespress, Hibapress, Le360, and Akhbarona — filtered to the Culture category from a larger Arabic-language news corpus. Each observation corresponds to a single published article, with outlet identity recorded as the primary grouping variable.
@@ -84,6 +86,12 @@ Finally, any token shorter than three characters was discarded, as these tend to
 
 One decision worth noting: the text was **not stemmed**. In many languages, stemming (reducing words to their root form) is a useful normalization step. Arabic, however, is a root-and-pattern language where words are built from three-letter roots through internal vowel changes and affixes, not simple prefix or suffix removal. Standard stemming approaches designed for languages like English perform poorly on Arabic and can distort meaning. Keeping the full word forms was therefore a more conservative and reliable choice, at the cost of some vocabulary redundancy.
 
+Remove punctuation (Arabic and Latin)
+
+```         
+text = str_remove_all(text, "[[:punct:]]"),
+```
+
 ```{r}
 
 library(tidyverse)
@@ -103,9 +111,6 @@ culture_clean <- culture_df %>%
     
     # Remove email addresses
     text = str_remove_all(text, "\\S+@\\S+"),
-    
-    # Remove punctuation (Arabic and Latin)
-    text = str_remove_all(text, "[[:punct:]]"),
     
     # Remove numbers
     text = str_remove_all(text, "[[:digit:]]"),
@@ -151,7 +156,7 @@ custom_stopwords <- c(
   "انه","أنه", "مغرب", "عبر", "عبد"  # morocco "مغرب" is  is so frequent it's basically noise. 
 )
 
-custom_stopwords2 <- c("وذلك","أيضا", "أخرى","خاصة", "المغربية", "المغربي", "المغرب")
+custom_stopwords2 <- c("وذلك","أيضا","إلا","لأن", "أخرى","خاصة", "المغربية", "المغربي", "المغرب")
 
 all_stopwords <- c(arabic_stopwords, custom_stopwords, custom_stopwords2)
 
@@ -175,6 +180,18 @@ culture_tokens %>%
 ```
 
 After preprocessing, the corpus contains **4.4 million tokens** across the 15,966 articles. The 30 most frequent words are overwhelmingly thematic rather than noise, which means the cleaning pipeline worked well.
+
+```{r}
+# Sample 100 rows first THEN apply function — much faster
+set.seed(123)
+test_tokens <- culture_tokens[sample(nrow(culture_tokens), 100), ]
+
+# Apply stemmer
+test_tokens$word_stemmed <- my_arabic_stemmer(test_tokens$word)
+
+# View result
+test_tokens[, c("word", "word_stemmed")]
+```
 
 Before running the topic model, we save a small reference table that links each article to its outlet. This is needed later to tell the model which newspaper published each piece.
 
@@ -220,17 +237,57 @@ The model is set to find 10 topics. An earlier exploratory run with 15 produced 
 #| message: false
 
 library(stm)
+
+# RUN K=15 (just for comparison figure)
+if (!file.exists("stm_model_k15.rds")) {
+  stm_model_k15 <- stm(
+    documents  = culture_stm$documents,
+    vocab      = culture_stm$vocab,
+    K          = 15,
+    prevalence = ~ source,
+    data       = meta_aligned,
+    max.em.its = 75,
+    init.type  = "Spectral",
+    verbose    = TRUE
+  )
+  saveRDS(stm_model_k15, "stm_model_k15.rds")
+} else {
+  stm_model_k15 <- readRDS("stm_model_k15.rds")
+}
+
+```
+
+```{r}
+# Topic proportions summary plot
+plot(stm_model_k15, type = "summary", xlim = c(0, 0.3))
+```
+
+```{r}
+#| results: hide
+#| message: false
+
+library(stm)
+
 # Run STM
-stm_model <- stm(
-  documents  = culture_stm$documents,
-  vocab      = culture_stm$vocab,
-  K          = 10,   #changed from 15 bcs too much overlap and incoherence
-  prevalence = ~ source,
-  data       = meta_aligned,
-  max.em.its = 75,
-  init.type  = "Spectral",
-  verbose    = TRUE
-)
+if (!file.exists("stm_model_k10.rds")) {
+  stm_model_k10 <- stm(
+    documents  = culture_stm$documents,
+    vocab      = culture_stm$vocab,
+    K          = 10,
+    prevalence = ~ source,
+    data       = meta_aligned,
+    max.em.its = 75,
+    init.type  = "Spectral",
+    verbose    = TRUE
+  )
+  saveRDS(stm_model_k10, "stm_model_k10.rds")
+} else {
+  stm_model_k10 <- readRDS("stm_model_k10.rds")
+}
+
+# Make sure stm_model still points to k10 for rest of analysis
+stm_model <- stm_model_k10
+
 ```
 
 Following model convergence, the top words per topic were inspected to assign interpretive labels, and the expected topic proportions were examined across the full corpus before moving to outlet-level comparisons.
@@ -452,3 +509,329 @@ Figure 2 visualises the bootstrapped regression results across all ten topics an
 These results broadly support H1: outlet identity does predict thematic emphasis, and the differences are statistically robust across nearly all topics.
 
 The most direct test of H2 is visible in the Books, Heritage & Museums and Literary Cinema & Criticism rows: Hespress sits clearly to the right while Le360 hovers near zero, confirming that Hespress, not Le360, is the literary outlet in the Moroccan cultural news landscape according to this corpus. This is the core finding of the analysis.
+
+## PART 2: PREDICTIVE MODELLING
+
+**Research Question:** What article-level features predict the degree of celebrity focus in Moroccan cultural news articles?
+
+Having established that outlet identity shapes thematic emphasis in Moroccan cultural news, I now extend the analysis into a predictive framework. The outcome variable is a composite celebrity focus score, constructed by summing each article's STM-estimated proportions on Topic 2 (Celebrity Scandals & Legal) and Topic 8 (Celebrity Social Media). These two topics were merged because they both capture celebrity-oriented content and treating them separately would artificially split the same underlying dimension.
+
+Predictors include outlet identity, article length, title length, vocabulary richness, and the proportion of foreign-script characters (entre autres) in the body text. I first evaluate a baseline linear regression on a held-out test set, then use 10-fold cross-validation to obtain a more reliable estimate of predictive performance, and finally apply lasso regression to determine which subset of features produces the most predictive model.
+
+### SECTION 1: BUILDING OUR PREDICTORS AND OUTCOME
+
+Article length
+
+```{r}
+culture_df <- culture_df %>%
+  mutate(article_length = str_count(Body, "\\S+"))
+```
+
+Title length
+
+```{r}
+culture_df <- culture_df %>%
+  mutate(title_length = str_count(Title, "\\S+"))
+```
+
+Vocabulary richness
+
+```{r}
+culture_df <- culture_df %>% mutate(doc_id = row_number())
+vocab_richness <- culture_tokens %>%
+  group_by(doc_id) %>%
+  summarise(
+    total_words  = n(),
+    unique_words = n_distinct(word),
+    vocab_rich   = unique_words / total_words
+  )
+culture_df <- culture_df %>% left_join(vocab_richness, by = "doc_id")
+```
+
+Proportion of foreign words
+
+```{r}
+culture_df <- culture_df %>%
+  mutate(
+    latin_chars = str_count(Body, "[A-Za-z]"),
+    total_chars = nchar(Body),
+    foreign_prop = latin_chars / total_chars
+  )
+```
+
+Topic proportions
+
+```{r}
+topic_props <- as.data.frame(stm_model$theta)
+colnames(topic_props) <- paste0("topic_", 1:10)
+
+meta_aligned <- bind_cols(meta_aligned, topic_props)
+
+culture_df <- culture_df %>%
+  left_join(
+    meta_aligned %>% select(doc_id, starts_with("topic_")),
+    by = "doc_id"
+  )
+```
+
+Celebrity score: the outcome
+
+```{r}
+
+# Add celebrity_score as a new column in culture_df
+culture_df <- culture_df %>%
+  mutate(celebrity_score = topic_8 + topic_2)
+
+
+```
+
+Other text features
+
+```{r}
+
+# Add quick text features to culture_df
+culture_df <- culture_df %>%
+  mutate(
+    
+    # Average word length in characters — celebrity writing tends to be simpler
+    avg_word_length = nchar(gsub("[^a-zA-Z\u0600-\u06FF]", "", Body)) / article_length,
+    
+    # Quote density — how often reporting verbs appear per word
+    quote_density = str_count(Body, "قال|قالت|أكد|أكدت|صرح|أوضح") / article_length
+  )
+```
+
+**Has number in title** — celebrity articles often have listicle-style titles ("5 things about...")
+
+```{r}
+culture_df <- culture_df %>%
+  mutate(title_has_number = as.integer(str_detect(Title, "[0-9]")))
+```
+
+For the next set of variables created, I ask the question of what makes an article celebrity focused theoritically.
+
+-   It's about a specific **person** (not an institution or event)
+
+-   It has an **emotional or dramatic angle** (scandal, death, romance)
+
+-   It's **reactive** (responding to something a celebrity did or said)
+
+So meaningful dummy variables could be the following
+
+```{r}
+
+#Article mentions death/obituary — could capture the poetry/obituary topic bleeding into celebrity
+culture_df <- culture_df %>%
+  mutate(mentions_death = as.integer(str_detect(Body, "وفاة|توفي|رحيل|فقدنا")))
+
+
+#Article mentions a prize or award — captures cinema awards topic
+culture_df <- culture_df %>%
+  mutate(mentions_award = as.integer(str_detect(Body, "جائزة|تكريم|فاز|حصل")))
+
+#Article mentions social media platforms — directly relevant to celebrity social media topic
+culture_df <- culture_df %>%
+  mutate(mentions_socialmedia = as.integer(str_detect(Body, "يوتيوب|انستغرام|تيكتوك|فيسبوك|تويتر")))
+```
+
+As part of this analysis, I attempted to enrich the predictor set by extracting named entity information from the article texts using the CAMeL Tools Arabic NER model (ner-arabert), a BERT-based named entity recognition system trained on Modern Standard Arabic. The goal was to create two additional article-level features — person_count, measuring the raw number of person names mentioned per article, and person_density, normalizing that count by article length — on the premise that celebrity-focused articles systematically mention more named individuals than articles covering institutional or literary cultural topics. Due to computational constraints and processing time limitations on a dataset of 15,966 articles, the pipeline could not be completed within the timeframe of this submission. This approach will be pursued in the final version of the report, where it is expected to meaningfully improve the predictive performance of the model.
+
+```{r}
+# Load NER results from Python
+ner_results <- read_csv("C:/Users/hp/Documents/DAT505/DAT505-RR2/ner_results.csv",
+                        show_col_types = FALSE)
+
+# Quick check — make sure it looks right
+head(ner_results)
+nrow(ner_results)
+
+# Join to culture_df by doc_id
+culture_df <- culture_df %>%
+  left_join(ner_results, by = "doc_id")
+
+# Verify the new columns are there
+colnames(culture_df)
+
+# Quick sanity check — distribution of person counts
+summary(culture_df$person_count)
+summary(culture_df$person_density)
+```
+
+The reason we need `model_df` separately is that `culture_df` still has lots of columns we don't want in the regression (Title, Body, doc_id, total_words, the other topic proportions etc.). `model_df` is a clean, lean version with only the outcome + predictors.
+
+```{r}
+
+  # Keep only the variables we need: outcome + predictors
+ 
+model_df <- culture_df %>%
+  select(celebrity_score, source, article_length, title_length,
+         vocab_rich, foreign_prop, avg_word_length, quote_density) %>%
+  na.omit()
+```
+
+### SECTION 2: Predictive Modelling of Celebrity Focus
+
+#### Baseline Model Performance: Train/Test Split
+
+The dataset is split into 80% for training and 20% for testing. A linear regression is fitted on the training set only, then used to predict celebrity scores on the test set (data the model has never seen). This tells us how well the model generalises beyond the data it was trained on.
+
+```{r}
+# TRAIN / TEST SPLIT 
+
+set.seed(123) # for reproducibility
+
+# Randomly select 80% of row indices for training
+train_idx <- sample(1:nrow(model_df), size = 0.8 * nrow(model_df))
+
+# Split into train and test sets
+train <- model_df[train_idx, ]
+test  <- model_df[-train_idx, ]
+```
+
+```{r}
+# FIT MAIN MODEL ON TRAIN SET 
+
+# Linear regression predicting celebrity_score from all predictors
+main_model <- lm(celebrity_score ~ ., data = train)
+
+# Predict on the test set
+predictions <- predict(main_model, newdata = test)
+```
+
+```{r}
+# EVALUATE PERFORMANCE
+
+# RMSE: average prediction error (lower = better)
+rmse <- sqrt(mean((test$celebrity_score - predictions)^2))
+
+# R-squared: proportion of variance explained (higher = better)
+r2 <- cor(test$celebrity_score, predictions)^2
+
+# MAE: mean absolute error — average absolute difference between predicted and actual
+mae <- mean(abs(test$celebrity_score - predictions))
+
+# Print all metrics
+cat("RMSE:", round(rmse, 4), "\n")
+cat("R²:  ", round(r2, 4), "\n")
+cat("MAE: ", round(mae, 4), "\n")
+
+# Full model summary on train set — shows coefficients and significance
+summary(main_model)
+```
+
+The model was trained on 80% of the data and evaluated on the remaining 20%. On the test set, it achieved :
+
+-   RMSE of 0.2536 means predictions are off by about 0.25 units on average. Since celebrity_score ranges from 0 to 2, this is a moderate error.
+
+<!-- -->
+
+-   R² of 0.1565 means the model explains about 16% of variance in celebrity focus.
+
+<!-- -->
+
+-   MAE of 0.1897 confirms predictions deviate by roughly 0.19 units on average from the true score.
+
+The model explains approximately 16% of variance in celebrity focus which is very small, but consistent with the noisy, high-dimensional nature of text-derived data. Turning to the coefficients estimated on the training set, all predictors reach statistical significance. Outlet identity emerges as the dominant predictor: all three outlets score lower on celebrity content than Akhbarona, with Le360 showing the largest negative coefficient (β = -0.25). Among text features, quote density shows the strongest positive association (β = 8.81), suggesting that articles quoting individuals more frequently tend to be more celebrity-focused. Average word length is negatively associated with celebrity score (β = -0.07), consistent with the expectation that celebrity writing uses simpler, shorter words. Foreign script proportion is also negative (β = -0.54), while vocabulary richness shows a small positive effect (β = 0.27).
+
+#### CROSS VALIDATION
+
+**CV with 10 FOLD**
+
+A single train/test split depends on which particular 80% of the data ends up in training. This means a different random split could give slightly different results. 10-fold cross-validation addresses this by splitting the full dataset into 10 equal chunks, training on 9 and testing on 1, rotating through all 10 combinations and averaging the results. This gives a more reliable and stable estimate of predictive performance.
+
+```{r}
+library(caret)
+
+# Define 10-fold cross-validation rules
+train_control_cv <- trainControl(
+  method = "cv",
+  number = 10
+)
+
+# Launch model training with 10-fold CV
+cv_model <- train(
+  celebrity_score ~ .,
+  data      = model_df,
+  method    = "lm",
+  metric    = "RMSE",
+  trControl = train_control_cv
+)
+
+print(cv_model)
+```
+
+10-fold cross-validation was chosen given the large sample size (n = 15,965), which ensures each fold contains sufficient observations for stable estimation. Across the 10 folds, the model achieves an average RMSE of 0.247, R² of 0.171, and MAE of 0.186.
+
+-   RMSE of 0.247 means that on average the model's predictions deviate from the true celebrity score by about 0.25 units.
+
+-   MAE of 0.186 tells a similar story but is less sensitive to large errors: the typical prediction is off by roughly 0.19 units.
+
+-   R² of 0.171 means the model accounts for about 17% of the variance in celebrity focus across articles.
+
+    These results are closely consistent with the train/test estimates (RMSE = 0.254, R² = 0.157, MAE = 0.190). It confirms that the model's performance is stable across different data splits and is not driven by one lucky partition. The modest but consistent R² of around 17% suggests that outlet identity and structural text features carry genuine, if limited, predictive signal for celebrity focus.
+
+**CV with BOOTSTRAP**
+
+Bootstrap resampling repeatedly draws random samples with replacement from the full dataset, meaning some articles appear multiple times in a sample and others not at all. This is done 10 times, each time training on the bootstrap sample and testing on the original data. It's a different way of estimating model stability that doesn't require splitting the data into fixed folds.
+
+```{r}
+# Define bootstrap rules
+train_control_boot <- trainControl(
+  method = "boot",
+  number = 10
+)
+
+# Launch model training with bootstrap
+cv_model_boot <- train(
+  celebrity_score ~ .,
+  data      = model_df,
+  method    = "lm",
+  metric    = "RMSE",
+  trControl = train_control_boot
+)
+
+print(cv_model_boot)
+```
+
+The bootstrap results are nearly identical to the 10-fold CV estimates: RMSE of 0.247, R² of 0.165, and MAE of 0.186. The fact that two fundamentally different resampling strategies — one splitting the data into fixed folds, the other drawing random samples with replacement — converge on the same performance figures is strong evidence that the model's predictive performance is genuine and stable. The consistency across train/test split, 10-fold CV, and bootstrap resampling all pointing to roughly RMSE ≈ 0.25 and R² ≈ 0.16 gives confidence that these estimates are not an artifact of any particular methodological choice.
+
+#### LASSO REGRESSION FOR PREDICTION
+
+Lasso regression works like linear regression but adds a penalty for complexity. It shrinks coefficients of less useful variables towards zero and can drop them entirely. This forces the model to identify the most predictive subset of variables rather than just using everything. The optimal penalty strength (lambda) is chosen via 10-fold CV, selecting the value that minimises prediction error.
+
+```{r}
+library(glmnet)
+
+# Define CV rules for lasso
+tc_lasso <- trainControl(
+  method = "cv",
+  number = 10
+)
+
+# Train lasso model — alpha=1 means lasso, lambda range searched via CV
+model_lasso <- train(
+  celebrity_score ~ .,
+  data     = model_df,
+  method   = "glmnet",
+  tuneGrid = expand.grid(alpha = 1, lambda = seq(0, 0.01, 0.0001)),
+  metric   = "RMSE",
+  trControl = tc_lasso
+)
+
+# Best lambda chosen by CV
+model_lasso$bestTune
+
+# Results at best lambda
+model_lasso$results[which(model_lasso$results$lambda == model_lasso$finalModel$lambdaOpt), ]
+
+# Which variables survived lasso?
+coef(model_lasso$finalModel, model_lasso$finalModel$lambdaOpt)
+```
+
+The optimal lambda selected by cross-validation is 0.0001 which is a very small penalty indicating that lasso barely needed to shrink any coefficients. This is confirmed by the coefficients output: all nine predictors survived lasso with non-zero coefficients, meaning none were deemed redundant enough to drop. This tells us that every variable in the model carries at least some predictive signal, and that the model is not overfitted.
+
+At this optimal lambda, the model achieves RMSE of 0.247, R² of 0.170, and MAE of 0.186, virtually identical to both the train/test split and cross-validation estimates. The stability of these figures across three different evaluation approaches is the central finding of this section: the model consistently explains around 17% of variance in celebrity focus regardless of how performance is assessed.
+
+In terms of which variables matter most, the lasso coefficients mirror the linear regression findings. Outlet identity dominates: Le360 shows the largest negative coefficient (β = -0.25), followed by Hibapress (β = -0.19) and Hespress (β = -0.18), all relative to Akhbarona as the reference category. Among text features, quote density is by far the strongest predictor (β = 8.59) — articles that quote individuals more frequently are substantially more celebrity-focused. Foreign script proportion is negatively associated with celebrity content (β = -0.55), average word length shows a small negative effect (β = -0.07), and vocabulary richness a small positive one (β = 0.27). Article length and title length survive but with negligible coefficients, suggesting they carry minimal practical importance.
+
+Overall, the lasso results confirm that the most predictive model available with these variables is essentially the full model. However, the ceiling on predictive performance at around R² = 0.17 points to the limits of structural text features alone, and motivates the planned incorporation of named entity (person) density in the final version of this report.
