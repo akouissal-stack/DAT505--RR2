@@ -14,9 +14,7 @@ execute:
 editor: visual
 ---
 
-## PART 1: STM & REGRESSION
-
-## Introduction
+# Introduction
 
 This report examines the thematic structure of cultural coverage in Moroccan digital news. The dataset consists of 15,966 articles drawn from four major online outlets — Hespress, Hibapress, Le360, and Akhbarona — filtered to the Culture category from a larger Arabic-language news corpus. Each observation corresponds to a single published article, with outlet identity recorded as the primary grouping variable.
 
@@ -26,7 +24,9 @@ H1: Thematic emphasis in cultural news coverage differs significantly across Mor
 
 H2: Le360 and Hespress will allocate greater coverage to institutional and literary cultural topics compared to Hibapress and Akhbarona, with Le360 leading in literary and intellectual themes given its formally oriented reputation, and Hespress following closely behind due to its perceived institutional character.
 
-## Analyses
+# PART 1: PREPARATION
+
+## SECTION 1 : COMBINING DATASETS
 
 Four filtered datasets were merged into a single dataframe containing 15,966 articles and three variables: article title, body text, and source.
 
@@ -72,7 +72,7 @@ View(culture_df)
 
 ```
 
-### SECTION 1 : TEXT PREPROCESSING FOR ARABIC TOPIC MODELLING
+## SECTION 2 : TEXT PREPROCESSING FOR ARABIC TOPIC MODELLING
 
 Before the topic model could be run, the raw article text required several cleaning steps to reduce noise and isolate meaningful content.
 
@@ -85,12 +85,6 @@ The most iterative part of preprocessing was stopword removal. Arabic presents a
 Finally, any token shorter than three characters was discarded, as these tend to be leftover particles or noise rather than meaningful words.
 
 One decision worth noting: the text was **not stemmed**. In many languages, stemming (reducing words to their root form) is a useful normalization step. Arabic, however, is a root-and-pattern language where words are built from three-letter roots through internal vowel changes and affixes, not simple prefix or suffix removal. Standard stemming approaches designed for languages like English perform poorly on Arabic and can distort meaning. Keeping the full word forms was therefore a more conservative and reliable choice, at the cost of some vocabulary redundancy.
-
-Remove punctuation (Arabic and Latin)
-
-```         
-text = str_remove_all(text, "[[:punct:]]"),
-```
 
 ```{r}
 
@@ -115,6 +109,9 @@ culture_clean <- culture_df %>%
     # Remove numbers
     text = str_remove_all(text, "[[:digit:]]"),
     
+    # removes dots and punctuation more aggressively
+    text = str_remove_all(text, "[[:punct:]٪،؛؟!«»\\.\\-]"),
+    
     # Remove Arabic diacritics (tashkeel - the small vowel marks)
     text = str_remove_all(text, "[\u064B-\u065F]"),
     
@@ -122,8 +119,7 @@ culture_clean <- culture_df %>%
   # Add a unique document ID — we'll need this later
   mutate(doc_id = row_number())
 
-# Quick check
-head(culture_clean$text, 3)
+
 
 # 1B: TOKENIZE (one word per row)
 
@@ -156,7 +152,13 @@ custom_stopwords <- c(
   "انه","أنه", "مغرب", "عبر", "عبد"  # morocco "مغرب" is  is so frequent it's basically noise. 
 )
 
-custom_stopwords2 <- c("وذلك","أيضا","إلا","لأن", "أخرى","خاصة", "المغربية", "المغربي", "المغرب")
+custom_stopwords2 <- c(
+  "وذلك", "أيضا", "إلا", "لأن", "أخرى", "خاصة",
+  "المغربية", "المغربي", "المغرب", "مغربي", "مغربية",
+  "مغاربة", "المغاربة", "مغربيين", "مغربيات",
+  "مغاربي", "مغاربية", "بالمغرب", "للمغرب",
+  "المغرب"
+)
 
 all_stopwords <- c(arabic_stopwords, custom_stopwords, custom_stopwords2)
 
@@ -164,13 +166,17 @@ all_stopwords <- c(arabic_stopwords, custom_stopwords, custom_stopwords2)
 culture_tokens <- culture_tokens %>%
   filter(!word %in% all_stopwords)
 
+# Remove only the definite article ال from the beginning of each token
+# No other stemming applied
+culture_tokens <- culture_tokens %>%
+  mutate(word = str_remove(word, "^ال"))
 
-# 1D: REMOVE SHORT TOKENS (less than 3 characters)
+
+# 1D: REMOVE SHORT TOKENS (less than 2 characters)
 # These are usually noise — conjunctions, leftover particles
 
 culture_tokens <- culture_tokens %>%
-  filter(nchar(word) >= 3)
-
+  filter(nchar(word) >= 2)
 
 
 culture_tokens %>%
@@ -180,18 +186,6 @@ culture_tokens %>%
 ```
 
 After preprocessing, the corpus contains **4.4 million tokens** across the 15,966 articles. The 30 most frequent words are overwhelmingly thematic rather than noise, which means the cleaning pipeline worked well.
-
-```{r}
-# Sample 100 rows first THEN apply function — much faster
-set.seed(123)
-test_tokens <- culture_tokens[sample(nrow(culture_tokens), 100), ]
-
-# Apply stemmer
-test_tokens$word_stemmed <- my_arabic_stemmer(test_tokens$word)
-
-# View result
-test_tokens[, c("word", "word_stemmed")]
-```
 
 Before running the topic model, we save a small reference table that links each article to its outlet. This is needed later to tell the model which newspaper published each piece.
 
@@ -203,7 +197,9 @@ culture_meta <- culture_clean %>%
 
 ```
 
-### SECTION 2: THE STRUCTURAL TOPIC MODEL
+# PART 2: STM & REGRESSION
+
+## SECTION 1: THE STRUCTURAL TOPIC MODEL
 
 A Structural Topic Model (STM) is a method that automatically discovers recurring themes in a large collection of texts. The basic idea is simple: words that tend to appear together probably belong to the same theme. Feed the model 15,966 articles and it will find, on its own, that "film", "director", and "screening" keep showing up in the same articles, and label that cluster a topic. You then inspect the top words and give the topic a human-readable name.
 
@@ -230,7 +226,7 @@ meta_aligned <- culture_meta %>%
 
 ```
 
-The model is set to find 10 topics. An earlier exploratory run with 15 produced too much overlap between adjacent themes, cinema and film festivals kept bleeding into each other, for instance, so 10 is a cleaner, more interpretable solution.
+The model is set to find 10 topics. An earlier exploratory run with 15 produced too much overlap between adjacent themes, cinema and film festivals kept bleeding into each other, for instance, so 10 is a cleaner, more interpretable solution. We can see a snippet of it below in the first topic proportions summary plot (Figure 1).
 
 ```{r}
 #| results: hide
@@ -259,8 +255,12 @@ if (!file.exists("stm_model_k15.rds")) {
 
 ```{r}
 # Topic proportions summary plot
-plot(stm_model_k15, type = "summary", xlim = c(0, 0.3))
+plot(stm_model_k15, type = "summary", xlim = c(0, 0.3), n = 5)
 ```
+
+**Figure 1:** *Expected proportion of each topic across the 15,966-article corpus with k=15. Topics are ordered by prevalence. Labels reflect the five highest-probability words per topic.*
+
+The 15-topic solution suffers from weak discriminant validity between topics. Instead of yielding clearly distinct thematic clusters, it fragments coherent domains into multiple, partially redundant topics. This is particularly evident in the overlap between cinema-related themes (e.g., films, festivals, actors), which appear split across several topics with highly similar vocabularies. This “topic bleeding” indicates that the model is overfitting the latent structure—capturing noise and micro-variations rather than substantively meaningful distinctions. As a result, interpretability declines: topics become harder to label, less theoretically coherent, and less useful for downstream analysis. In contrast, a more parsimonious solution (e.g., k=10) better aggregates related terms into unified themes, improving both clarity and analytical leverage.
 
 ```{r}
 #| results: hide
@@ -290,7 +290,7 @@ stm_model <- stm_model_k10
 
 ```
 
-Following model convergence, the top words per topic were inspected to assign interpretive labels, and the expected topic proportions were examined across the full corpus before moving to outlet-level comparisons.
+Once the model converged, topic interpretation proceeded through close inspection of the top words associated with each topic across four metrics: highest probability words, FREX words (which are frequent within the topic but rare across others), and score-weighted terms. Labels were assigned on the basis of semantic coherence across these lists, with FREX words carrying particular weight since they capture what is genuinely distinctive about a topic rather than what is merely common.
 
 ```{r}
 #| eval: false
@@ -303,28 +303,34 @@ labelTopics(stm_model, n = 10)
 
 ## Assign labels based on inspection
 topic_labels <- c(
-  "Cinema & Film Awards",        # Topic 1
-  "Celebrity Scandals & Legal",  # Topic 2
-  "Music & Songs",               # Topic 3
-  "TV & Ramadan Series",         # Topic 4
-  "Cultural Festivals & Theatre",# Topic 5
-  "Books, Heritage & Museums",   # Topic 6
-  "Poetry, Obituaries & Arts",   # Topic 7
-  "Celebrity Social Media",      # Topic 8
-  "Literary Cinema & Criticism", # Topic 9
-  "Cultural Policy & Ministry"   # Topic 10
+  "Books, Poetry & Literary Culture",     # Topic 1 — كتاب، رواية، شعر، شاعر، أدب
+  "Visual Arts & Heritage",               # Topic 2 — معرض، متحف، تشكيلي، لوحات
+  "Celebrity Scandals & Legal",           # Topic 3 — لمجرد، اغتصاب، قضائية، محكمة
+  "Music & Songs",                        # Topic 4 — أغنية، كليب، ألبوم، راب
+  "TV & Ramadan Series",                  # Topic 5 — مسلسل، رمضان، قناة، مسرحية
+  "Cultural Festivals & Events",          # Topic 6 — مهرجان، دورة، فعاليات، كناوة
+  "Cinema & Film Awards",                 # Topic 7 — فيلم، سينما، أوسكار، مخرج
+  "Opinion & Cultural Criticism",         # Topic 8 — يجب، مجتمع، يقول، فن 
+  "Cultural Policy & Ministry",           # Topic 9 — وزارة، ثقافة، دعم، اتفاقية
+  "Celebrity Social Media"                # Topic 10 — انستقرام، فنانة، نجمة، إليسا
 )
 ```
+
+To illustrate the process concretely, consider Topic 7. Its highest probability words include فيلم (film), سينما (cinema), أفلام (films), مخرج (director), and جائزة (prize). Its FREX words include أوسكار (Oscars), سعفة (Palme d'Or), and سكورسيزي (Scorsese). Taken together, these terms point unambiguously to coverage of cinema as an art form — festival awards, critical reception, and auteur directors. The label 'Cinema & Film Awards' follows directly from this pattern.
+
+This labeling process is inherently qualitative and involves interpretive judgment. A different analyst might draw slightly different boundaries, particularly for topics with overlapping vocabularies.
 
 ```{r}
 
 # Topic proportions summary plot
-plot(stm_model, type = "summary", xlim = c(0, 0.3))
+plot(stm_model, type = "summary", xlim = c(0, 0.3), n=5)
 ```
 
-***Figure 1**. Expected proportion of each topic across the 15,966-article corpus. Topics are ordered by prevalence. Labels reflect the three highest-probability words per topic.*
+***Figure 2**. Expected proportion of each topic across the 15,966-article corpus with k=10. Topics are ordered by prevalence. Labels reflect the five highest-probability words per topic.*
 
-Music & Songs (Topic 3) dominates the corpus, accounting for roughly 20% of all cultural coverage, followed closely by Cultural Festivals & Theatre (Topic 5) and Books, Heritage & Museums (Topic 6). Entertainment-adjacent topics — celebrity scandals (Topic 2) and social media content (Topic 8) — occupy the middle range, while TV & Ramadan Series (Topic 4), Cultural Policy (Topic 10), and Literary Cinema (Topic 9) are the least represented themes overall. This distribution suggests that Moroccan cultural news is driven primarily by music and live events coverage, with institutional and policy-oriented content occupying a comparatively smaller share of the space.
+Cultural Festivals & Events (Topic 6) dominates the corpus, accounting for roughly 25% of all cultural coverage, followed closely by Cultural Policy & Ministry (Topic 9) and Music & Songs (Topic 4). This is perhaps the most striking finding at the distributional level — institutional and policy-oriented content, often assumed to be marginal in digital news, occupies a substantial share of Moroccan cultural coverage alongside event-driven reporting. Celebrity-oriented topics — Celebrity Scandals & Legal (Topic 3) and Celebrity Social Media (Topic 10) — sit in the middle range at around 15% each, while TV & Ramadan Series (Topic 5), Books & Literary Culture (Topic 1), and Visual Arts & Heritage (Topic 2) are the least represented themes. Opinion & Cultural Criticism (Topic 8) is the smallest topic overall.
+
+Taken together, this distribution suggests that Moroccan digital cultural news is structured primarily around events, institutions, and music, with celebrity content present but not dominant at the corpus level, a pattern that may however vary considerably across outlets.
 
 Having confirmed that the topic model converged, the estimated topic proportions are extracted from the model object. Each article is represented as a vector of 10 values summing to one (10 topics), where each value reflects the share of that article's content attributed to a given topic. Outlet identity is then re-attached to this dataframe, producing the dataset used for all subsequent outlet-level comparisons.
 
@@ -344,12 +350,69 @@ topic_proportions$source <- meta_aligned$source
 head(topic_proportions)
 ```
 
-### SECTION 3: ESTIMATE EFFECT OF SOURCE ON TOPIC PREVALENCE
+## SECTION 2: ESTIMATE EFFECT OF SOURCE ON TOPIC PREVALENCE
 
-To examine whether thematic emphasis in cultural coverage varies across news outlets, I use the `estimateEffect` function from the STM package, which regresses estimated topic proportions on outlet identity. For each of the 10 topics, the model estimates how much each outlet deviates from the baseline in its coverage of that topic. Unlike a standard OLS regression applied to raw topic proportions, `estimateEffect` incorporates the posterior uncertainty from the topic model itself when computing standard errors, producing more honest estimates. The `uncertainty = "Global"` option propagates this uncertainty globally across the model. Source (news outlet) is the sole predictor, with Akhbarona serving as the reference category by default due to alphabetical ordering.
+Before estimating outlet-specific effects, I first conduct one-way ANOVA tests on document-level topic proportions to assess whether topic prevalence differs across news outlets at all. For each of the 10 topics, this provides a global test of whether mean topic proportions vary significantly by source. This step serves as a preliminary diagnostic: rather than identifying which outlets differ from a reference category, it establishes whether outlet-level variation exists in the first place. I then use `estimateEffect` to model those differences more precisely within the STM framework, allowing outlet comparisons while incorporating uncertainty from the topic model itself.
 
 ```{r}
-#| results: hide
+library(dplyr)
+library(knitr)
+library(kableExtra)
+
+# make sure source is a factor
+meta_aligned$source <- as.factor(meta_aligned$source)
+
+# extract topic proportions
+theta <- stm_model$theta
+
+# run one-way ANOVA for all topics
+anova_results <- lapply(1:ncol(theta), function(k) {
+  model <- lm(theta[, k] ~ source, data = meta_aligned)
+  aov_tab <- anova(model)
+
+  data.frame(
+    topic = paste0("Topic ", k),
+    df_between = aov_tab$Df[1],
+    df_within = aov_tab$Df[2],
+    F_value = aov_tab$`F value`[1],
+    p_value = aov_tab$`Pr(>F)`[1]
+  )
+})
+
+anova_results <- do.call(rbind, anova_results)
+
+
+anova_results %>%
+  mutate(p_value_display = format(p_value, scientific = TRUE)) %>%
+  select(topic, df_between, df_within, F_value, p_value_display) %>%
+  rename(
+    Topic = topic,
+    `df between` = df_between,
+    `df within` = df_within,
+    `F statistic` = F_value,
+    `p-value` = p_value_display
+  ) %>%
+  # kable() tends to round very small numeric p-values to 0, which is misleading.
+# To avoid this, p-values are converted to a character format using scientific notation.
+  kable(
+    caption = "One-way ANOVA results for topic prevalence by news outlet",
+    align = "c"
+  ) %>%
+  kable_styling(
+    full_width = FALSE,
+    bootstrap_options = c("striped", "hover"),
+    position = "center"
+  )
+```
+
+***Table 1:** One-way ANOVA results for topic prevalence by news outlet. Each test evaluates whether mean topic proportions differ across sources*
+
+The ANOVA results reveal substantial between-outlet variation in topic prevalence across all 10 topics. For each topic, the null hypothesis of equal mean proportions across sources is decisively rejected (all p \< .001), indicating that topic distributions are strongly structured by outlet identity. The magnitude of the F-statistics further suggests that these differences are not trivial but reflect meaningful divergence in editorial focus across news sources.
+
+To examine whether thematic emphasis in cultural coverage varies across news outlets, I use the `estimateEffect` function from the STM package, which regresses estimated topic proportions on outlet identity. For each of the 10 topics, the model estimates how much each outlet deviates from the baseline in its coverage of that topic. Unlike a standard OLS regression applied to raw topic proportions, `estimateEffect` incorporates the posterior uncertainty from the topic model itself when computing standard errors, producing more honest estimates. The `uncertainty = "Global"` option propagates this uncertainty globally across the model. Source (news outlet) is the sole predictor, with Akhbarona serving as the reference category by default due to alphabetical ordering. This baseline choice is arbitrary and does not affect the substantive interpretation of results, as the analysis focuses on relative differences between outlets rather than on the specific reference category.
+
+```{r}
+ndefined# ndefinedresults: hide
 effect <- estimateEffect(
   formula     = 1:10 ~ source,
   stmobj      = stm_model,
@@ -393,17 +456,17 @@ kable(reg_table, row.names = FALSE,
   collapse_rows(columns = 1, valign = "top")
 ```
 
-***Table 1.** presents the estimated coefficients, standard errors, and significance levels for all ten topics across the three remaining outlets.*
+***Table 2.** presents the estimated coefficients, standard errors, and significance levels for all ten topics across the three remaining outlets.*
 
 The regression results reveal substantial and statistically significant differences in thematic emphasis across all four outlets, with Akhbarona serving as the reference category. These results support H1: outlet identity is a meaningful predictor of cultural topic prevalence.
 
-Turning to H2, the findings only partially confirm the hypothesis. As expected, Hespress does not behave like a typical mass-audience outlet. It allocates significantly more coverage to Books, Heritage & Museums (β = 0.088, p \< .001), Literary Cinema & Criticism (β = 0.074, p \< .001), and Poetry, Obituaries & Arts (β = 0.081, p \< .001) than Akhbarona — and crucially, more than Le360 on the literary and intellectual dimensions. Le360, which was expected to lead on serious cultural content, instead shows its strongest advantage on Cinema & Film Awards (β = 0.061, p \< .001), Cultural Festivals & Theatre (β = 0.123, p \< .001), and Music & Songs (β = 0.138, p \< .001) — a more event-driven, institutionalized profile rather than a literary one.
+Turning to H2, the findings only partially confirm the hypothesis. As expected, Hespress does not behave like a typical mass-audience outlet. It allocates significantly more coverage to Books, Poetry & Literary Culture (β = 0.110, p \< .001), Opinion & Cultural Criticism (β = 0.053, p \< .001), and Cultural Policy & Ministry (β = 0.060, p \< .001) than Akhbarona — and crucially, more than Le360 on the literary and intellectual dimensions. Le360, which was expected to lead on serious cultural content, instead shows its strongest advantage on Cultural Festivals & Events (β = 0.148, p \< .001), Music & Songs (β = 0.105, p \< .001), and Cultural Policy & Ministry (β = 0.066, p \< .001) — a more event-driven, institutionalized profile rather than a literary one.
 
-Hibapress presents the sharpest contrast to both. Its dominant signal is Celebrity Social Media (β = 0.177, p \< .001), while it significantly undercovers TV & Ramadan Series (β = -0.022, p \< .01) and Cultural Policy (β = -0.020, p \< .01). It is clearly the entertainment-oriented outlet.
+Hibapress presents the sharpest contrast to both. Its dominant signal is Celebrity Social Media (β = 0.126, p \< .001), while it significantly undercovers Opinion & Cultural Criticism (β = -0.018, p \< .01), Cultural Policy & Ministry (β = -0.035, p \< .001), and Cinema & Film Awards (β = -0.017, p \< .05). It is clearly the entertainment-oriented outlet.
 
-The pattern that emerges is therefore more nuanced than a simple serious-versus-popular divide. Hespress occupies an unexpected literary niche, Le360 owns the institutional events space, and Hibapress corners celebrity content.
+The pattern that emerges is therefore more nuanced than a simple serious-versus-popular divide. Hespress occupies an unexpected literary and critical niche, Le360 owns the institutional and event-driven cultural space, and Hibapress corners celebrity and entertainment content.
 
-### SECTION 4: BOOTSTRAPPING
+## SECTION 3: BOOTSTRAPPING
 
 What we're doing is bootstrapping the regression step conditional on the topic model being fixed, instead of a bootstrap re-estimating the entire topic model on each bootstrap sample.
 
@@ -458,12 +521,12 @@ for (t in 1:10) {
 #| echo: false
 kable(boot_summary, row.names = FALSE,
       col.names = c("Topic", "Outlet", "2.5%", "97.5%"),
-      caption = "Table 2. Bootstrapped 95% Confidence Intervals (ref: Akhbarona)") %>%
+      caption = "Table 3. Bootstrapped 95% Confidence Intervals (ref: Akhbarona)") %>%
   kable_styling(full_width = FALSE, font_size = 12) %>%
   collapse_rows(columns = 1, valign = "top")
 ```
 
-The bootstrapped confidence intervals corroborate the `estimateEffect` results. Across all 10 topics, coefficients that were significant in the regression maintain the same sign and do not straddle zero in the bootstrap, confirming that the outlet differences identified are stable and not a sampling artifact. The most notable results directly relevant to H2 hold firmly: Hespress shows consistently positive intervals for Books, Heritage & Museums and Literary Cinema & Criticism, while Le360's intervals for the same topics are narrow and cross zero, confirming that Hespress genuinely leads on literary content.
+The bootstrapped confidence intervals corroborate the `estimateEffect` results. Across all 10 topics, coefficients that were significant in the regression maintain the same sign and do not straddle zero in the bootstrap, confirming that the outlet differences identified are stable and not a sampling artifact. The most notable results directly relevant to H2 hold firmly: Hespress shows consistently positive intervals for Books, Poetry & Literary Culture, Opinion & Cultural Criticism, and Cultural Policy & Ministry, while Le360’s intervals for these topics remain positive but comparatively smaller for the literary and critical dimensions, confirming that Hespress genuinely leads on literary and intellectual content.
 
 ```{r}
 library(ggplot2)
@@ -502,39 +565,39 @@ ggplot(plot_data, aes(x = mid, y = topic, color = source)) +
   theme(legend.position = "none")
 ```
 
-***Figure 2.** Effect of news outlet on cultural topic prevalence, relative to Akhbarona (reference category). Points represent bootstrapped median coefficients and horizontal lines denote 95% confidence intervals. Coefficients to the right of zero indicate greater topic prevalence relative to Akhbarona; coefficients to the left indicate lower prevalence.*
+***Figure 3.** Effect of news outlet on cultural topic prevalence, relative to Akhbarona (reference category). Points represent bootstrapped median coefficients and horizontal lines denote 95% confidence intervals. Coefficients to the right of zero indicate greater topic prevalence relative to Akhbarona; coefficients to the left indicate lower prevalence.*
 
-Figure 2 visualises the bootstrapped regression results across all ten topics and three outlets. The pattern is striking in its consistency. Hespress (red) shows positive and precisely estimated effects for Books, Heritage & Museums, Literary Cinema & Criticism, and Poetry, Obituaries & Arts — its literary profile is unambiguous. Le360 (blue) dominates on Music & Songs, Cultural Festivals & Theatre, and Cinema & Film Awards, confirming its event-driven institutional orientation. Hibapress (green) stands out almost exclusively on Celebrity Social Media, where its coefficient dwarfs all others in the model, while remaining near zero or negative across every other topic.
+Figure 3 visualises the bootstrapped regression results across all ten topics and three outlets. The pattern is striking in its consistency. Hespress (red) shows positive and precisely estimated effects for Books, Poetry & Literary Culture, Opinion & Cultural Criticism, and Cultural Policy & Ministry — its literary and intellectual profile is unambiguous. Le360 (blue) dominates on Music & Songs, Cultural Festivals & Events, and Cultural Policy & Ministry, confirming its event-driven institutional orientation. Hibapress (green) stands out almost exclusively on Celebrity Social Media, where its coefficient dwarfs all others in the model, while remaining near zero or negative across most other topics.
 
 These results broadly support H1: outlet identity does predict thematic emphasis, and the differences are statistically robust across nearly all topics.
 
-The most direct test of H2 is visible in the Books, Heritage & Museums and Literary Cinema & Criticism rows: Hespress sits clearly to the right while Le360 hovers near zero, confirming that Hespress, not Le360, is the literary outlet in the Moroccan cultural news landscape according to this corpus. This is the core finding of the analysis.
+The most direct test of H2 is visible in the Books, Poetry & Literary Culture and Opinion & Cultural Criticism rows: Hespress sits clearly to the right while Le360 remains comparatively closer to zero or weaker on the critical dimension, confirming that Hespress, not Le360, is the literary outlet in the Moroccan cultural news landscape according to this corpus. This is the core finding of the analysis.
 
-## PART 2: PREDICTIVE MODELLING
+# PART 3: PREDICTIVE MODELLING
 
 **Research Question:** What article-level features predict the degree of celebrity focus in Moroccan cultural news articles?
 
-Having established that outlet identity shapes thematic emphasis in Moroccan cultural news, I now extend the analysis into a predictive framework. The outcome variable is a composite celebrity focus score, constructed by summing each article's STM-estimated proportions on Topic 2 (Celebrity Scandals & Legal) and Topic 8 (Celebrity Social Media). These two topics were merged because they both capture celebrity-oriented content and treating them separately would artificially split the same underlying dimension.
+Having established that outlet identity shapes thematic emphasis in Moroccan cultural news, I now extend the analysis into a predictive framework. The outcome variable is a composite celebrity focus score, constructed by summing each article's STM-estimated proportions on the *Celebrity Scandals & Legal* *(Topic 3)* and *Celebrity Social Media (Topic 10)* topics. These two topics are combined because they both capture distinct but complementary forms of celebrity-oriented coverage, and treating them separately would artificially fragment a single underlying dimension of celebrity focus.
 
 Predictors include outlet identity, article length, title length, vocabulary richness, and the proportion of foreign-script characters (entre autres) in the body text. I first evaluate a baseline linear regression on a held-out test set, then use 10-fold cross-validation to obtain a more reliable estimate of predictive performance, and finally apply lasso regression to determine which subset of features produces the most predictive model.
 
-### SECTION 1: BUILDING OUR PREDICTORS AND OUTCOME
+## SECTION 1: BUILDING OUR PREDICTORS AND OUTCOME
 
-Article length
+**Article length**
 
 ```{r}
 culture_df <- culture_df %>%
   mutate(article_length = str_count(Body, "\\S+"))
 ```
 
-Title length
+**Title length**
 
 ```{r}
 culture_df <- culture_df %>%
   mutate(title_length = str_count(Title, "\\S+"))
 ```
 
-Vocabulary richness
+**Vocabulary richness**
 
 ```{r}
 culture_df <- culture_df %>% mutate(doc_id = row_number())
@@ -548,7 +611,7 @@ vocab_richness <- culture_tokens %>%
 culture_df <- culture_df %>% left_join(vocab_richness, by = "doc_id")
 ```
 
-Proportion of foreign words
+**Proportion of foreign words**
 
 ```{r}
 culture_df <- culture_df %>%
@@ -559,7 +622,7 @@ culture_df <- culture_df %>%
   )
 ```
 
-Topic proportions
+**Topic proportions**
 
 ```{r}
 topic_props <- as.data.frame(stm_model$theta)
@@ -574,18 +637,18 @@ culture_df <- culture_df %>%
   )
 ```
 
-Celebrity score: the outcome
+**Celebrity score: the outcome**
 
 ```{r}
 
 # Add celebrity_score as a new column in culture_df
 culture_df <- culture_df %>%
-  mutate(celebrity_score = topic_8 + topic_2)
+  mutate(celebrity_score = topic_10 + topic_3)
 
 
 ```
 
-Other text features
+**Other text features**
 
 ```{r}
 
@@ -599,22 +662,19 @@ culture_df <- culture_df %>%
     # Quote density — how often reporting verbs appear per word
     quote_density = str_count(Body, "قال|قالت|أكد|أكدت|صرح|أوضح") / article_length
   )
-```
 
-**Has number in title** — celebrity articles often have listicle-style titles ("5 things about...")
-
-```{r}
+#Has number in title — celebrity articles often have listicle-style titles ("5 things about...")
 culture_df <- culture_df %>%
   mutate(title_has_number = as.integer(str_detect(Title, "[0-9]")))
 ```
 
 For the next set of variables created, I ask the question of what makes an article celebrity focused theoritically.
 
--   It's about a specific **person** (not an institution or event)
+-   It's about a specific person (not an institution or event)
 
--   It has an **emotional or dramatic angle** (scandal, death, romance)
+-   It has an emotional or dramatic angle (scandal, death, romance)
 
--   It's **reactive** (responding to something a celebrity did or said)
+-   It's reactive (responding to something a celebrity did or said)
 
 So meaningful dummy variables could be the following
 
@@ -634,7 +694,11 @@ culture_df <- culture_df %>%
   mutate(mentions_socialmedia = as.integer(str_detect(Body, "يوتيوب|انستغرام|تيكتوك|فيسبوك|تويتر")))
 ```
 
-As part of this analysis, I attempted to enrich the predictor set by extracting named entity information from the article texts using the CAMeL Tools Arabic NER model (ner-arabert), a BERT-based named entity recognition system trained on Modern Standard Arabic. The goal was to create two additional article-level features — person_count, measuring the raw number of person names mentioned per article, and person_density, normalizing that count by article length — on the premise that celebrity-focused articles systematically mention more named individuals than articles covering institutional or literary cultural topics. Due to computational constraints and processing time limitations on a dataset of 15,966 articles, the pipeline could not be completed within the timeframe of this submission. This approach will be pursued in the final version of the report, where it is expected to meaningfully improve the predictive performance of the model.
+As part of this analysis, I attempted to enrich the predictor set by extracting named entity information from the article texts using the CAMeL Tools Arabic NER model (ner-arabert), a BERT-based named entity recognition system trained on Modern Standard Arabic.
+
+For each article, the model was applied to the first 100 words of the body text — corresponding roughly to the opening paragraph. This truncation was a deliberate methodological choice justified by two considerations: first, Arabic digital news follows the inverted pyramid structure, meaning the most newsworthy information including the names of individuals involved appears in the opening lines; second, applying the full NER pipeline to 15,966 complete articles was computationally hard within the timeframe of this project.
+
+From the entity tags produced, two variables were constructed: person_count, measuring the raw number of person-name tokens identified per article, and person_density, which normalizes that count by article length to account for the fact that longer articles will naturally contain more names. The theoretical motivation is straightforward — celebrity-focused articles are by definition about specific individuals and should therefore exhibit systematically higher person name density than articles covering institutional events, cultural policy, or literary topics
 
 ```{r}
 # Load NER results from Python
@@ -649,15 +713,32 @@ nrow(ner_results)
 culture_df <- culture_df %>%
   left_join(ner_results, by = "doc_id")
 
-# Verify the new columns are there
-colnames(culture_df)
-
 # Quick sanity check — distribution of person counts
 summary(culture_df$person_count)
 summary(culture_df$person_density)
 ```
 
+```{r}
+# Histogram of person count distribution
+ggplot(culture_df, aes(x = person_count)) +
+  geom_histogram(binwidth = 1, fill = "steelblue", color = "white") +
+  labs(
+    title = "Distribution of Person Name Count Across Articles",
+    x = "Number of Person Names (first 100 words)",
+    y = "Number of Articles"
+  ) +
+  theme_minimal()
+```
+
+***Figure 4.** Distribution of person name counts across articles, based on named entity recognition applied to the first 100 words of each article.*
+
+Figure 4 shows a right-skewed distribution. Most articles mention between 1 and 10 person names in their opening 100 words, with the frequency dropping sharply beyond that. A small number of articles contain upwards of 20 named individuals.
+
+With all predictors constructed, a model dataframe was assembled containing only the outcome variable and the relevant predictors.
+
 The reason we need `model_df` separately is that `culture_df` still has lots of columns we don't want in the regression (Title, Body, doc_id, total_words, the other topic proportions etc.). `model_df` is a clean, lean version with only the outcome + predictors.
+
+Since named entity recognition was applied to a fixed window of 100 words per article rather than the full text, person_count — the raw number of person-name tokens identified — is retained as the more appropriate measure, as normalizing by article length would be meaningless when the input length is already held constant.
 
 ```{r}
 
@@ -665,13 +746,13 @@ The reason we need `model_df` separately is that `culture_df` still has lots of 
  
 model_df <- culture_df %>%
   select(celebrity_score, source, article_length, title_length,
-         vocab_rich, foreign_prop, avg_word_length, quote_density) %>%
-  na.omit()
+         vocab_rich, foreign_prop, avg_word_length, quote_density, title_has_number, mentions_death, mentions_award, mentions_socialmedia, person_count ) %>%
+  na.omit() #i checked for nas before i have one row that's empty because there is no text in the body so that's what's getting omitted by this line
 ```
 
-### SECTION 2: Predictive Modelling of Celebrity Focus
+## SECTION 2: Predictive Modelling of Celebrity Focus
 
-#### Baseline Model Performance: Train/Test Split
+### Baseline Model Performance: Train/Test Split
 
 The dataset is split into 80% for training and 20% for testing. A linear regression is fitted on the training set only, then used to predict celebrity scores on the test set (data the model has never seen). This tells us how well the model generalises beyond the data it was trained on.
 
@@ -719,21 +800,19 @@ cat("MAE: ", round(mae, 4), "\n")
 summary(main_model)
 ```
 
-The model was trained on 80% of the data and evaluated on the remaining 20%. On the test set, it achieved :
+The model was trained on 80% of the data and evaluated on the remaining 20%. On the test set, it achieved:
 
--   RMSE of 0.2536 means predictions are off by about 0.25 units on average. Since celebrity_score ranges from 0 to 2, this is a moderate error.
+-   RMSE of 0.2382 means predictions are off by about 0.24 units on average. Since celebrity_score ranges from 0 to 2, this is a moderate error.
 
-<!-- -->
+-   R² of 0.3778 means the model explains about 38% of variance in celebrity focus.
 
--   R² of 0.1565 means the model explains about 16% of variance in celebrity focus.
+-   MAE of 0.1766 confirms predictions deviate by roughly 0.18 units on average from the true score.
 
-<!-- -->
+The model explains approximately 38% of variance in celebrity focus — a meaningful improvement over the initial specification, reflecting the added predictive value of the NER-based and binary features. Turning to the coefficients estimated on the training set, most predictors reach statistical significance. Outlet identity remains a strong predictor: Hespress and Le360 score substantially lower on celebrity content than Akhbarona (β = -0.22 and β = -0.23 respectively), while Hibapress does not differ significantly from Akhbarona (p = .076). Among text features, quote density shows the strongest positive association (β = 6.82), suggesting that articles quoting individuals more frequently tend to be more celebrity-focused. Mentions of social media platforms is also strongly positive (β = 0.14), directly reflecting the social media orientation of celebrity content. Average word length is negatively associated with celebrity score (β = -0.17), consistent with the expectation that celebrity writing uses simpler shorter words. Foreign script proportion shows a positive effect (β = 0.92), and vocabulary richness a modest positive one (β = 0.25). Mentions of awards is negative (β = -0.04), suggesting award coverage skews toward serious cinema rather than celebrity content. Notably, mentions_death does not reach significance (p = .749) and person_count shows a small negative effect (β = -0.001), a counterintuitive finding that warrants further investigation.
 
--   MAE of 0.1897 confirms predictions deviate by roughly 0.19 units on average from the true score.
+*Side note: The negative coefficient for person_count is counterintuitive given the theoretical expectation that celebrity articles mention more individuals. One possible explanation is that the NER model, applied only to the first 100 words, may have picked up on person names in non-celebrity contexts — such as author names in literary articles or politician names in cultural policy pieces — introducing noise into the variable. This limitation will be addressed in future work by applying NER to the full article text.*
 
-The model explains approximately 16% of variance in celebrity focus which is very small, but consistent with the noisy, high-dimensional nature of text-derived data. Turning to the coefficients estimated on the training set, all predictors reach statistical significance. Outlet identity emerges as the dominant predictor: all three outlets score lower on celebrity content than Akhbarona, with Le360 showing the largest negative coefficient (β = -0.25). Among text features, quote density shows the strongest positive association (β = 8.81), suggesting that articles quoting individuals more frequently tend to be more celebrity-focused. Average word length is negatively associated with celebrity score (β = -0.07), consistent with the expectation that celebrity writing uses simpler, shorter words. Foreign script proportion is also negative (β = -0.54), while vocabulary richness shows a small positive effect (β = 0.27).
-
-#### CROSS VALIDATION
+### CROSS VALIDATION
 
 **CV with 10 FOLD**
 
@@ -760,17 +839,17 @@ cv_model <- train(
 print(cv_model)
 ```
 
-10-fold cross-validation was chosen given the large sample size (n = 15,965), which ensures each fold contains sufficient observations for stable estimation. Across the 10 folds, the model achieves an average RMSE of 0.247, R² of 0.171, and MAE of 0.186.
+10-fold cross-validation was chosen given the large sample size (n = 15,965), which ensures each fold contains sufficient observations for stable estimation. Across the 10 folds, the model achieves an average RMSE of 0.237, R² of 0.385, and MAE of 0.177.
 
--   RMSE of 0.247 means that on average the model's predictions deviate from the true celebrity score by about 0.25 units.
+-    RMSE of 0.237 means that on average the model's predictions deviate from the true celebrity score by about 0.24 units.
 
--   MAE of 0.186 tells a similar story but is less sensitive to large errors: the typical prediction is off by roughly 0.19 units.
+-    MAE of 0.177 tells a similar story but is less sensitive to large errors: the typical prediction is off by roughly 0.18 units.
 
--   R² of 0.171 means the model accounts for about 17% of the variance in celebrity focus across articles.
+-    R² of 0.385 means the model accounts for about 39% of the variance in celebrity focus across articles.
 
-    These results are closely consistent with the train/test estimates (RMSE = 0.254, R² = 0.157, MAE = 0.190). It confirms that the model's performance is stable across different data splits and is not driven by one lucky partition. The modest but consistent R² of around 17% suggests that outlet identity and structural text features carry genuine, if limited, predictive signal for celebrity focus.
+These results are closely consistent with the train/test estimates (RMSE = 0.238, R² = 0.378, MAE = 0.177), confirming that the model's performance is stable across different data splits and is not driven by one lucky partition. An R² of around 38-39% consistently across both evaluation approaches represents a substantial improvement over the initial model specification, and suggests that the enriched predictor set captures meaningful signal about what drives celebrity focus in Moroccan cultural news.
 
-**CV with BOOTSTRAP**
+### **CV with BOOTSTRAP**
 
 Bootstrap resampling repeatedly draws random samples with replacement from the full dataset, meaning some articles appear multiple times in a sample and others not at all. This is done 10 times, each time training on the bootstrap sample and testing on the original data. It's a different way of estimating model stability that doesn't require splitting the data into fixed folds.
 
@@ -793,9 +872,9 @@ cv_model_boot <- train(
 print(cv_model_boot)
 ```
 
-The bootstrap results are nearly identical to the 10-fold CV estimates: RMSE of 0.247, R² of 0.165, and MAE of 0.186. The fact that two fundamentally different resampling strategies — one splitting the data into fixed folds, the other drawing random samples with replacement — converge on the same performance figures is strong evidence that the model's predictive performance is genuine and stable. The consistency across train/test split, 10-fold CV, and bootstrap resampling all pointing to roughly RMSE ≈ 0.25 and R² ≈ 0.16 gives confidence that these estimates are not an artifact of any particular methodological choice.
+The bootstrap results are nearly identical to the 10-fold CV estimates: RMSE of 0.237, R² of 0.384, and MAE of 0.177. The fact that two fundamentally different resampling strategies — one splitting the data into fixed folds, the other drawing random samples with replacement — converge on the same performance figures is strong evidence that the model's predictive performance is genuine and stable. The consistency across train/test split, 10-fold CV, and bootstrap resampling — all pointing to roughly RMSE ≈ 0.24 and R² ≈ 0.38 — gives confidence that these estimates are not an artifact of any particular methodological choice.
 
-#### LASSO REGRESSION FOR PREDICTION
+### LASSO REGRESSION FOR PREDICTION
 
 Lasso regression works like linear regression but adds a penalty for complexity. It shrinks coefficients of less useful variables towards zero and can drop them entirely. This forces the model to identify the most predictive subset of variables rather than just using everything. The optimal penalty strength (lambda) is chosen via 10-fold CV, selecting the value that minimises prediction error.
 
@@ -828,10 +907,12 @@ model_lasso$results[which(model_lasso$results$lambda == model_lasso$finalModel$l
 coef(model_lasso$finalModel, model_lasso$finalModel$lambdaOpt)
 ```
 
-The optimal lambda selected by cross-validation is 0.0001 which is a very small penalty indicating that lasso barely needed to shrink any coefficients. This is confirmed by the coefficients output: all nine predictors survived lasso with non-zero coefficients, meaning none were deemed redundant enough to drop. This tells us that every variable in the model carries at least some predictive signal, and that the model is not overfitted.
+The optimal lambda selected by cross-validation is 0.0003 — a very small penalty — indicating that lasso found little reason to eliminate any predictor. All 14 variables survived with non-zero coefficients, suggesting that each carries at least marginal predictive signal. This outcome reflects both the genuine informativeness of the predictor set and its relatively modest size. Lasso's variable selection properties are most pronounced when the number of candidate predictors substantially exceeds the number of truly informative ones, a condition not met here.
 
-At this optimal lambda, the model achieves RMSE of 0.247, R² of 0.170, and MAE of 0.186, virtually identical to both the train/test split and cross-validation estimates. The stability of these figures across three different evaluation approaches is the central finding of this section: the model consistently explains around 17% of variance in celebrity focus regardless of how performance is assessed.
+At this optimal lambda, the model achieves RMSE of 0.236, R² of 0.386, and MAE of 0.177 — virtually identical to both the train/test split and cross-validation estimates. The stability of these figures across three different evaluation approaches is the central finding of this section: the model consistently explains around 38-39% of variance in celebrity focus regardless of how performance is assessed.
 
-In terms of which variables matter most, the lasso coefficients mirror the linear regression findings. Outlet identity dominates: Le360 shows the largest negative coefficient (β = -0.25), followed by Hibapress (β = -0.19) and Hespress (β = -0.18), all relative to Akhbarona as the reference category. Among text features, quote density is by far the strongest predictor (β = 8.59) — articles that quote individuals more frequently are substantially more celebrity-focused. Foreign script proportion is negatively associated with celebrity content (β = -0.55), average word length shows a small negative effect (β = -0.07), and vocabulary richness a small positive one (β = 0.27). Article length and title length survive but with negligible coefficients, suggesting they carry minimal practical importance.
+In terms of which variables matter most, the lasso coefficients mirror the linear regression findings. Outlet identity remains dominant: Hespress and Le360 show the largest negative coefficients (β = -0.22 and β = -0.23 respectively), while Hibapress barely differs from Akhbarona (β = 0.008), confirming that Akhbarona and Hibapress are the two celebrity-oriented outlets. Among text features, quote density remains by far the strongest predictor (β = 6.83) — articles quoting individuals more frequently are substantially more celebrity-focused. Mentions of social media platforms is strongly positive (β = 0.14), directly reflecting the social media orientation of celebrity content. Foreign script proportion shows a positive association (β = 0.86), average word length a negative one (β = -0.17), and vocabulary richness a modest positive effect (β = 0.25). Mentions of awards is negative (β = -0.05), consistent with award coverage skewing toward serious cinema. Mentions of death survives with a negligible coefficient (β = 0.002), carrying no practical importance despite not being dropped. Person count shows a small negative effect (β = -0.001), a counterintuitive finding discussed in the previous section.
 
-Overall, the lasso results confirm that the most predictive model available with these variables is essentially the full model. However, the ceiling on predictive performance at around R² = 0.17 points to the limits of structural text features alone, and motivates the planned incorporation of named entity (person) density in the final version of this report.
+Overall, the lasso results confirm that the most predictive model available with this predictor set is essentially the full model — no variable was redundant enough to eliminate. The consistent R² of approximately 38% across all three evaluation methods represents a meaningful level of predictive performance for text-derived data, and suggests that the combination of outlet identity, linguistic features, and content markers captures genuine signal about what drives celebrity focus in Moroccan cultural news.
+
+# CONCLUSION
