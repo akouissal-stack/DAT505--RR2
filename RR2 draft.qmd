@@ -412,7 +412,8 @@ The ANOVA results reveal substantial between-outlet variation in topic prevalenc
 To examine whether thematic emphasis in cultural coverage varies across news outlets, I use the `estimateEffect` function from the STM package, which regresses estimated topic proportions on outlet identity. For each of the 10 topics, the model estimates how much each outlet deviates from the baseline in its coverage of that topic. Unlike a standard OLS regression applied to raw topic proportions, `estimateEffect` incorporates the posterior uncertainty from the topic model itself when computing standard errors, producing more honest estimates. The `uncertainty = "Global"` option propagates this uncertainty globally across the model. Source (news outlet) is the sole predictor, with Akhbarona serving as the reference category by default due to alphabetical ordering. This baseline choice is arbitrary and does not affect the substantive interpretation of results, as the analysis focuses on relative differences between outlets rather than on the specific reference category.
 
 ```{r}
-ndefined# ndefinedresults: hide
+#| results: hide
+
 effect <- estimateEffect(
   formula     = 1:10 ~ source,
   stmobj      = stm_model,
@@ -420,7 +421,6 @@ effect <- estimateEffect(
   uncertainty = "Global"
 )
 
-# Summary
 summary(effect, topics = 1:10)
 ```
 
@@ -587,7 +587,7 @@ Predictors include outlet identity, article length, title length, vocabulary ric
 
 ### COMPUTING VARIABLES
 
-### **Article length**
+**Article length**
 
 ```{r}
 culture_df <- culture_df %>%
@@ -826,11 +826,26 @@ Boxplot inspection reveals the presence of outliers across all four variables ex
 Specification curve analysis using the specr package could not be implemented due to version compatibility issues. Given the nature of this analysis — where the key analytical decisions concern variable inclusion and outlier treatment rather than model family or functional form — a manual comparison across four targeted specifications is sufficient.
 
 ```{r}
-# ndefinedManual sensitivity analysis — comparing model specifications
+# Refit main model on full dataset for sensitivity analysis
+# Note: main_model in the predictive section is fitted on train set only
+# Here we refit on full model_df for fair cross-specification comparison
+main_model_full <- lm(celebrity_score ~ ., data = model_df)
+
+# Create outlier-free dataset
+model_df_no_outliers <- model_df %>%
+  filter(
+    abs(scale(celebrity_score)) < 3,
+    abs(scale(article_length)) < 3,
+    abs(scale(person_count)) < 3,
+    abs(scale(quote_density)) < 3
+  )
+
+# Fit alternative specifications
 model_no_outliers <- lm(celebrity_score ~ ., data = model_df_no_outliers)
-model_no_ner <- lm(celebrity_score ~ . - person_count, data = model_df)
+model_no_ner      <- lm(celebrity_score ~ . - person_count, data = model_df)
 model_outlet_only <- lm(celebrity_score ~ source, data = model_df)
 
+# Compare performance across specifications
 sensitivity_results <- data.frame(
   Specification = c("Main model (all predictors)", 
                     "Without outliers", 
@@ -838,15 +853,15 @@ sensitivity_results <- data.frame(
                     "Outlet identity only"),
   N = c(nrow(model_df), nrow(model_df_no_outliers), 
         nrow(model_df), nrow(model_df)),
-  R2 = round(c(summary(main_model)$r.squared,
+  R2 = round(c(summary(main_model_full)$r.squared,
                summary(model_no_outliers)$r.squared,
                summary(model_no_ner)$r.squared,
                summary(model_outlet_only)$r.squared), 4),
-  Adj_R2 = round(c(summary(main_model)$adj.r.squared,
+  Adj_R2 = round(c(summary(main_model_full)$adj.r.squared,
                    summary(model_no_outliers)$adj.r.squared,
                    summary(model_no_ner)$adj.r.squared,
                    summary(model_outlet_only)$adj.r.squared), 4),
-  RMSE = round(c(sqrt(mean(main_model$residuals^2)),
+  RMSE = round(c(sqrt(mean(main_model_full$residuals^2)),
                  sqrt(mean(model_no_outliers$residuals^2)),
                  sqrt(mean(model_no_ner$residuals^2)),
                  sqrt(mean(model_outlet_only$residuals^2))), 4)
@@ -869,7 +884,7 @@ The main model achieves an R² of 0.389 and RMSE of 0.236. Removing outliers red
 library(performance)
 library(see)
 
-check_model(main_model)
+check_model(main_model_full)
 ```
 
 ***Figure 8.** Assumption checks for the main linear regression model, produced using the check_model() function from the performance package. Panels show from top left to bottom right: posterior predictive check, linearity, homogeneity of variance, influential observations, collinearity (VIF), and normality of residuals.*
